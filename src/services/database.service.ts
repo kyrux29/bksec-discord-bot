@@ -100,6 +100,13 @@ class DatabaseService {
         CREATE INDEX IF NOT EXISTS idx_task_submission_history_submission_id ON task_submission_history(submission_id);
       `);
 
+      // Migrate: add channels_purged column if not present
+      try {
+        this.db.exec('ALTER TABLE ctfs ADD COLUMN channels_purged INTEGER NOT NULL DEFAULT 0');
+      } catch {
+        // column already exists
+      }
+
       // Initialize counter if not exists
       const counter = this.db.prepare('SELECT value FROM metadata WHERE key = ?').get('counter');
       if (!counter) {
@@ -136,6 +143,20 @@ class DatabaseService {
   }
 
   /**
+   * Find CTF by Discord role ID
+   */
+  async findByRoleId(roleId: string): Promise<{ key: string; data: CTFData } | null> {
+    try {
+      const row = this.db.prepare('SELECT * FROM ctfs WHERE role = ?').get(roleId) as any;
+      if (!row) return null;
+      return { key: row.id.toString(), data: this.rowToCTFData(row) };
+    } catch (error) {
+      logger.error('Failed to find CTF by role ID:', error);
+      return null;
+    }
+  }
+
+  /**
    * Find CTF by category ID
    */
   async findByCategoryId(categoryId: string): Promise<{ key: string; data: CTFData } | null> {
@@ -157,7 +178,7 @@ class DatabaseService {
   /**
    * Add new CTF to database
    */
-  async addCTF(ctfData: Omit<CTFData, 'archived'>): Promise<number> {
+  async addCTF(ctfData: Omit<CTFData, 'archived' | 'channelsPurged'>): Promise<number> {
     try {
       // Get and increment counter
       const counter = this.db
@@ -234,6 +255,10 @@ class DatabaseService {
       if (updates.archived !== undefined) {
         setClauses.push('archived = ?');
         values.push(updates.archived ? 1 : 0);
+      }
+      if (updates.channelsPurged !== undefined) {
+        setClauses.push('channels_purged = ?');
+        values.push(updates.channelsPurged ? 1 : 0);
       }
 
       setClauses.push("updated_at = strftime('%s', 'now')");
@@ -349,6 +374,14 @@ class DatabaseService {
       logger.error('Failed to get database stats:', error);
       return { totalCTFs: 0, archivedCTFs: 0, activeCTFs: 0, counter: 0 };
     }
+  }
+
+  async markAsPurged(key: string): Promise<void> {
+    const id = parseInt(key);
+    this.db
+      .prepare("UPDATE ctfs SET channels_purged = 1, updated_at = strftime('%s', 'now') WHERE id = ?")
+      .run(id);
+    logger.info(`CTF marked as purged: ${key}`);
   }
 
   async createTask(input: {
@@ -557,6 +590,7 @@ class DatabaseService {
       channel: row.channel,
       endtime: row.endtime,
       archived: row.archived === 1,
+      channelsPurged: row.channels_purged === 1,
     };
   }
 

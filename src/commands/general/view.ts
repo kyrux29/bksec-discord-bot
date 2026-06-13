@@ -1,6 +1,7 @@
 import { SlashCommandBuilder, ChatInputCommandInteraction } from 'discord.js';
 import { Command } from '../../types';
-import { successEmbed, errorEmbed } from '../../utils/embed.builder';
+import { successEmbed, errorEmbed, warningEmbed } from '../../utils/embed.builder';
+import databaseService from '../../services/database.service';
 import logger from '../../utils/logger';
 
 const command: Command = {
@@ -27,6 +28,17 @@ const command: Command = {
 
       if (!role) {
         await interaction.editReply({ embeds: [errorEmbed('Invalid role')] });
+        return;
+      }
+
+      const ctfEntry = await databaseService.findByRoleId(role.id);
+      if (ctfEntry?.data.channelsPurged) {
+        await interaction.editReply({
+          embeds: [warningEmbed(
+            'Channels Unavailable',
+            `Channels for **${ctfEntry.data.name}** have been cleaned up to free server space. The role is kept for record-keeping.`
+          )],
+        });
         return;
       }
 

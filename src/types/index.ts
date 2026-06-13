@@ -33,6 +33,7 @@ export interface CTFData {
   channel: string;
   endtime: number;
   archived: boolean;
+  channelsPurged: boolean;
 }
 
 export type TaskCategory = 'pwn' | 'rev' | 'crypto' | 'all';

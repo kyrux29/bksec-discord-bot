@@ -444,11 +444,17 @@ class CTFTimeService {
         let emoji: string;
         let fieldValue: string;
 
+        if (ctf.data.channelsPurged) {
+          emoji = '🗑️ ';
+        } else if (ctf.data.archived) {
+          emoji = '📦 ';
+        } else {
+          emoji = '🟢 ';
+        }
+
         if (ctf.data.ctftimeid > 0) {
-          emoji = '🚩 ';
           fieldValue = `\`CTFTime ID: ${ctf.data.ctftimeid}\``;
         } else {
-          emoji = '⭐ ';
           fieldValue = `\`Cate ID: ${ctf.data.cate}\``;
         }
 
