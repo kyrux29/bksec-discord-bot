@@ -111,7 +111,10 @@ export interface CTFEmbedData {
   url?: string;
   color: number;
   thumbnail?: string;
-  footer?: string;
+  image?: string;
+  author?: { name: string; iconURL?: string; url?: string };
+  footer?: string | { text: string; iconURL?: string };
+  timestamp?: number | Date;
   fields: Array<{
     name: string;
     value: string;

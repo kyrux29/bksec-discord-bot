@@ -323,6 +323,7 @@ class CTFTimeService {
           description: '',
           color: 0xd50000,
           footer,
+          timestamp: Date.now(),
           fields,
         },
         totalPages: pagination.totalPages,
@@ -401,6 +402,7 @@ class CTFTimeService {
           description: '',
           color: 0xd50000,
           footer,
+          timestamp: Date.now(),
           fields,
         },
       };
@@ -472,6 +474,7 @@ class CTFTimeService {
           description: '🟢 Active  •  📦 Archived  •  🗑️ Purged',
           color: 0xd50000,
           footer,
+          timestamp: Date.now(),
           fields,
         },
         totalPages: pagination.totalPages,
