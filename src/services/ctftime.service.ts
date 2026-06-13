@@ -469,7 +469,7 @@ class CTFTimeService {
       return {
         embed: {
           title: 'CTF List',
-          description: '',
+          description: '🟢 Active  •  📦 Archived  •  🗑️ Purged',
           color: 0xd50000,
           footer,
           fields,
