@@ -466,12 +466,12 @@ class CTFTimeService {
         });
       }
 
-      const footer = `Page ${page + 1}/${pagination.totalPages}`;
+      const footer = `Page ${page + 1}/${pagination.totalPages}  •  🟢 Active  📦 Archived  🗑️ Purged`;
 
       return {
         embed: {
           title: 'CTF List',
-          description: '🟢 Active  •  📦 Archived  •  🗑️ Purged',
+          description: '',
           color: 0xd50000,
           footer,
           timestamp: Date.now(),
