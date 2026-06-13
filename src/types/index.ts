@@ -107,7 +107,7 @@ export interface CTFInfo {
 
 export interface CTFEmbedData {
   title: string;
-  description: string;
+  description?: string;
   url?: string;
   color: number;
   thumbnail?: string;
