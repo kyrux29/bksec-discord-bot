@@ -34,6 +34,17 @@ interface CacheEntry {
 
 const elapsed = (start: number) => `${Date.now() - start}ms`;
 
+export class CTFTimeAPIError extends Error {
+  constructor(public readonly statusCode?: number) {
+    super(
+      statusCode
+        ? `CTFtime API returned HTTP ${statusCode}`
+        : 'CTFtime API unreachable'
+    );
+    this.name = 'CTFTimeAPIError';
+  }
+}
+
 class CTFTimeService {
   private cache: CacheEntry | null = null;
 
@@ -41,10 +52,10 @@ class CTFTimeService {
     return !!this.cache && Date.now() - this.cache.timestamp < CACHE_TTL;
   }
 
-  private async fetchAllEvents(): Promise<CTFTimeEvent[]> {
+  private async fetchAllEvents(): Promise<{ data: CTFTimeEvent[]; stale: boolean }> {
     if (this.isCacheValid()) {
       logger.info(`Using cached events (age: ${Math.floor((Date.now() - this.cache!.timestamp) / 1000)}s)`);
-      return this.cache!.data;
+      return { data: this.cache!.data, stale: false };
     }
 
     const t = Date.now();
@@ -56,14 +67,16 @@ class CTFTimeService {
       );
       this.cache = { data: response.data, timestamp: Date.now() };
       logger.info(`Fetched ${response.data.length} events from API in ${elapsed(t)}`);
-      return response.data;
+      return { data: response.data, stale: false };
     } catch (error) {
-      logger.error('Error fetching events from API:', error);
+      const statusCode = axios.isAxiosError(error) ? error.response?.status : undefined;
+      logger.error(`CTFtime API error${statusCode ? ` (HTTP ${statusCode})` : ''}:`, error);
       if (this.cache) {
-        logger.warn('Returning stale cache due to fetch error');
-        return this.cache.data;
+        const ageMin = Math.floor((Date.now() - this.cache.timestamp) / 60000);
+        logger.warn(`Returning stale cache (${ageMin}m old) due to API error`);
+        return { data: this.cache.data, stale: true };
       }
-      return [];
+      throw new CTFTimeAPIError(statusCode);
     }
   }
 
@@ -144,13 +157,13 @@ class CTFTimeService {
   async findCTF(searchKey: string): Promise<number> {
     const t = Date.now();
     try {
-      const events = await this.fetchAllEvents();
+      const { data: events } = await this.fetchAllEvents();
       const match = events.find((ctf) => fuzzyMatch(searchKey, ctf.title));
       logger.info(`findCTF "${searchKey}" — ${match ? `found ${match.id}` : 'not found'} in ${elapsed(t)}`);
       return match?.id ?? 0;
     } catch (error) {
       logger.error('Error searching for CTF:', error);
-      return 0;
+      throw error;
     }
   }
 
@@ -160,7 +173,7 @@ class CTFTimeService {
       if (!isValidPagination(page, step)) return null;
 
       const now = Math.floor(Date.now() / 1000);
-      const events = await this.fetchAllEvents();
+      const { data: events, stale } = await this.fetchAllEvents();
 
       // Only show events that haven't started yet
       const upcoming = events.filter((ctf) => {
@@ -190,7 +203,8 @@ class CTFTimeService {
 
       const pageInfo = `Page ${page + 1}/${pagination.totalPages}`;
       const timezoneNote = 'Times are shown in your local timezone';
-      const footer = [longWarning, pageInfo, timezoneNote].filter(Boolean).join('\n');
+      const staleNote = stale ? '⚠️ CTFtime may be down — showing cached data' : undefined;
+      const footer = [longWarning, pageInfo, timezoneNote, staleNote].filter(Boolean).join('\n');
 
       logger.info(`getUpcomingCTF page ${page} in ${elapsed(t)}`);
 
@@ -214,7 +228,7 @@ class CTFTimeService {
     const t = Date.now();
     try {
       const now = Math.floor(Date.now() / 1000);
-      const events = await this.fetchAllEvents();
+      const { data: events, stale } = await this.fetchAllEvents();
 
       const fields: Array<{ name: string; value: string; inline?: boolean }> = [];
       let longWarning: string | undefined;
@@ -238,7 +252,8 @@ class CTFTimeService {
       }
 
       const timezoneNote = 'Times are shown in your local timezone';
-      const footer = longWarning ? `${longWarning}\n${timezoneNote}` : timezoneNote;
+      const staleNote = stale ? '⚠️ CTFtime may be down — showing cached data' : undefined;
+      const footer = [longWarning, timezoneNote, staleNote].filter(Boolean).join('\n');
 
       logger.info(`getOngoingCTF in ${elapsed(t)}, found ${fields.length} events`);
 

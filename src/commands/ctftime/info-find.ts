@@ -1,7 +1,7 @@
 import { SlashCommandBuilder, ChatInputCommandInteraction } from 'discord.js';
 import { Command } from '../../types';
-import ctftimeService from '../../services/ctftime.service';
-import { createEmbed, errorEmbed } from '../../utils/embed.builder';
+import ctftimeService, { CTFTimeAPIError } from '../../services/ctftime.service';
+import { createEmbed, errorEmbed, warningEmbed } from '../../utils/embed.builder';
 import logger from '../../utils/logger';
 
 const command: Command = {
@@ -53,7 +53,10 @@ const command: Command = {
       logger.error('Error in ct-info_find command:', error);
 
       if (interaction.deferred || interaction.replied) {
-        await interaction.editReply({ embeds: [errorEmbed('An error occurred')] });
+        const embed = error instanceof CTFTimeAPIError
+          ? warningEmbed('CTFtime is unreachable', `The bot is fine — CTFtime.org appears to be down.\n\`${error.message}\`\nPlease try again later.`)
+          : errorEmbed('An error occurred');
+        await interaction.editReply({ embeds: [embed] });
       }
     }
   },
