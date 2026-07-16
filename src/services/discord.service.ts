@@ -10,6 +10,8 @@ import {
 } from 'discord.js';
 import logger from '../utils/logger';
 import { config } from '../config/env';
+import databaseService from './database.service';
+import { isCtfLive } from '../utils/ctf-visibility';
 
 /**
  * Discord helper service for managing channels, roles, and permissions
@@ -38,38 +40,14 @@ class DiscordService {
 
       logger.info(`Created role: ${role.name}`);
 
-      // Get the VIEW_ALL_CTF role
-      const viewAllRole = guild.roles.cache.get(config.VIEW_ALL_CTF_ROLEID);
-
       // Create category
       const category = await guild.channels.create({
         name: normalizedName,
         type: ChannelType.GuildCategory,
       });
 
-      // Set permissions
-      await category.permissionOverwrites.create(role, {
-        ViewChannel: true,
-      });
-
-      if (viewAllRole) {
-        await category.permissionOverwrites.create(viewAllRole, {
-          ViewChannel: true,
-        });
-      }
-
-      if (config.DENY_CTF_ROLEID) {
-        const denyRole = guild.roles.cache.get(config.DENY_CTF_ROLEID);
-        if (denyRole) {
-          await category.permissionOverwrites.create(denyRole, {
-            ViewChannel: false,
-          });
-        } else {
-          await category.permissionOverwrites.create(config.DENY_CTF_ROLEID, {
-            ViewChannel: false,
-          });
-        }
-      }
+      // Live-phase visibility: active role only
+      await this.applyLivePermissions(guild, category.id, role.id);
 
       logger.info(`Created category: ${category.name}`);
 
@@ -119,9 +97,6 @@ class DiscordService {
     try {
       const normalizedName = name.trim();
 
-      // Get the VIEW_ALL_CTF role
-      const viewAllRole = guild.roles.cache.get(config.VIEW_ALL_CTF_ROLEID);
-
       // Create role (with angle brackets for special CTFs)
       const role = await guild.roles.create({
         name: `<${normalizedName}>`,
@@ -137,29 +112,8 @@ class DiscordService {
         type: ChannelType.GuildCategory,
       });
 
-      // Set permissions
-      await category.permissionOverwrites.create(role, {
-        ViewChannel: true,
-      });
-
-      if (viewAllRole) {
-        await category.permissionOverwrites.create(viewAllRole, {
-          ViewChannel: true,
-        });
-      }
-
-      if (config.DENY_CTF_ROLEID) {
-        const denyRole = guild.roles.cache.get(config.DENY_CTF_ROLEID);
-        if (denyRole) {
-          await category.permissionOverwrites.create(denyRole, {
-            ViewChannel: false,
-          });
-        } else {
-          await category.permissionOverwrites.create(config.DENY_CTF_ROLEID, {
-            ViewChannel: false,
-          });
-        }
-      }
+      // Live-phase visibility: active role only
+      await this.applyLivePermissions(guild, category.id, role.id);
 
       logger.info(`Created special category: ${category.name}`);
 
@@ -332,6 +286,81 @@ class DiscordService {
       logger.error('Error re-listing category:', error);
       return null;
     }
+  }
+
+  /**
+   * Live-phase category visibility: active role only (plus DENY deny).
+   * Removes any per-CTF / VIEW_ALL grants so only active-role members can see it.
+   */
+  async applyLivePermissions(
+    guild: Guild,
+    categoryId: string,
+    perCtfRoleId: string
+  ): Promise<void> {
+    const category = guild.channels.cache.get(categoryId) as CategoryChannel | undefined;
+    if (!category) {
+      logger.warn(`applyLivePermissions: category not found: ${categoryId}`);
+      return;
+    }
+
+    await category.permissionOverwrites.edit(config.ACTIVE_CTF_ROLEID, { ViewChannel: true });
+
+    if (config.DENY_CTF_ROLEID) {
+      await category.permissionOverwrites.edit(config.DENY_CTF_ROLEID, { ViewChannel: false });
+    }
+
+    // Ensure the per-CTF role and VIEW_ALL role cannot see it while live.
+    for (const roleId of [perCtfRoleId, config.VIEW_ALL_CTF_ROLEID]) {
+      if (roleId && category.permissionOverwrites.cache.has(roleId)) {
+        await category.permissionOverwrites.delete(roleId);
+      }
+    }
+  }
+
+  /**
+   * Ended-phase category visibility: additionally grant per-CTF role + VIEW_ALL.
+   * The active-role grant is intentionally left in place.
+   */
+  async applyEndedPermissions(
+    guild: Guild,
+    categoryId: string,
+    perCtfRoleId: string
+  ): Promise<void> {
+    const category = guild.channels.cache.get(categoryId) as CategoryChannel | undefined;
+    if (!category) {
+      logger.warn(`applyEndedPermissions: category not found: ${categoryId}`);
+      return;
+    }
+
+    if (perCtfRoleId) {
+      await category.permissionOverwrites.edit(perCtfRoleId, { ViewChannel: true });
+    }
+    await category.permissionOverwrites.edit(config.VIEW_ALL_CTF_ROLEID, { ViewChannel: true });
+  }
+
+  /**
+   * Revert any CTF whose time has run out to ended-phase visibility.
+   * Idempotent via the post_end_opened flag. Returns the number reverted.
+   */
+  async syncEndedCTFs(guild: Guild): Promise<number> {
+    const all = await databaseService.getAllCTFs();
+    const now = Math.floor(Date.now() / 1000);
+    let reverted = 0;
+
+    for (const { key, data } of all) {
+      if (data.archived || data.channelsPurged) continue;
+      if (!data.cate || data.cate === '0') continue;
+      if (data.postEndOpened) continue;
+      if (isCtfLive(data.endtime, now)) continue;
+      if (!guild.channels.cache.has(data.cate)) continue;
+
+      await this.applyEndedPermissions(guild, data.cate, data.role);
+      await databaseService.updateCTF(key, { postEndOpened: true });
+      reverted++;
+      logger.info(`Reverted ended CTF to normal visibility: ${data.name}`);
+    }
+
+    return reverted;
   }
 
   /**
