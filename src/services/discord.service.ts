@@ -341,6 +341,8 @@ class DiscordService {
   /**
    * Revert any CTF whose time has run out to ended-phase visibility.
    * Idempotent via the post_end_opened flag. Returns the number reverted.
+   * Best-effort: a failure on one CTF is logged and skipped (retried next
+   * sweep) rather than aborting the batch or throwing to the caller.
    */
   async syncEndedCTFs(guild: Guild): Promise<number> {
     const all = await databaseService.getAllCTFs();
@@ -354,10 +356,15 @@ class DiscordService {
       if (isCtfLive(data.endtime, now)) continue;
       if (!guild.channels.cache.has(data.cate)) continue;
 
-      await this.applyEndedPermissions(guild, data.cate, data.role);
-      await databaseService.updateCTF(key, { postEndOpened: true });
-      reverted++;
-      logger.info(`Reverted ended CTF to normal visibility: ${data.name}`);
+      try {
+        await this.applyEndedPermissions(guild, data.cate, data.role);
+        await databaseService.updateCTF(key, { postEndOpened: true });
+        reverted++;
+        logger.info(`Reverted ended CTF to normal visibility: ${data.name}`);
+      } catch (error) {
+        logger.error(`Error reverting ended CTF to normal visibility: ${data.name}`, error);
+        continue;
+      }
     }
 
     return reverted;

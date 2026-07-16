@@ -57,6 +57,7 @@ const command: Command = {
         endtime: endTime,
       });
 
+      // Revert any CTFs whose time has run out
       await discordService.syncEndedCTFs(interaction.guild);
 
       await interaction.editReply({
