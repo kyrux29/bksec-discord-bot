@@ -303,6 +303,10 @@ class DiscordService {
       return;
     }
 
+    // @everyone HAS ViewChannel in this guild's base permissions, so it must be
+    // denied explicitly — role allows alone would hide nothing.
+    await category.permissionOverwrites.edit(guild.roles.everyone, { ViewChannel: false });
+
     await category.permissionOverwrites.edit(config.ACTIVE_CTF_ROLEID, { ViewChannel: true });
 
     if (config.DENY_CTF_ROLEID) {
@@ -319,7 +323,8 @@ class DiscordService {
 
   /**
    * Ended-phase category visibility: additionally grant per-CTF role + VIEW_ALL.
-   * The active-role grant is intentionally left in place.
+   * The active-role grant is intentionally left in place. @everyone stays denied,
+   * so access remains role-gated (matching how archived categories behave).
    */
   async applyEndedPermissions(
     guild: Guild,
@@ -331,6 +336,8 @@ class DiscordService {
       logger.warn(`applyEndedPermissions: category not found: ${categoryId}`);
       return;
     }
+
+    await category.permissionOverwrites.edit(guild.roles.everyone, { ViewChannel: false });
 
     if (perCtfRoleId) {
       await category.permissionOverwrites.edit(perCtfRoleId, { ViewChannel: true });

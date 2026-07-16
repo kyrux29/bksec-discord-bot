@@ -104,6 +104,8 @@ async function main() {
 
     try {
       if (isLive) {
+        // @everyone has ViewChannel in this guild's base perms — deny explicitly.
+        await putOverwrite(row.cate, guildId!, 0, VIEW_CHANNEL);
         await putOverwrite(row.cate, activeRoleId!, VIEW_CHANNEL, 0);
         if (denyRoleId) await putOverwrite(row.cate, denyRoleId, 0, VIEW_CHANNEL);
         await deleteOverwrite(row.cate, row.role);
@@ -114,6 +116,8 @@ async function main() {
         console.log(`[LIVE ] ${row.name} — active-only applied`);
         live++;
       } else {
+        // @everyone stays denied so access remains role-gated.
+        await putOverwrite(row.cate, guildId!, 0, VIEW_CHANNEL);
         await putOverwrite(row.cate, activeRoleId!, VIEW_CHANNEL, 0);
         await putOverwrite(row.cate, row.role, VIEW_CHANNEL, 0);
         await putOverwrite(row.cate, viewAllRoleId!, VIEW_CHANNEL, 0);

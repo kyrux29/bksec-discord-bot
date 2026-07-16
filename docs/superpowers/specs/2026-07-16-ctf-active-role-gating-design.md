@@ -11,8 +11,11 @@ existing categories and all future ones, created via either creation path.
 
 ## Background (current behavior)
 
-- The guild `@everyone` role has **no** base View Channel permission, so channels are
-  hidden by default and made visible purely through per-category role overwrites.
+- The guild `@everyone` role **HAS** View Channel in its base permissions (verified
+  against the live guild: bitfield `2248473465835072`). Categories are therefore
+  visible to everyone **unless `@everyone` is explicitly denied** on the category.
+  Role allow-overwrites alone hide nothing. This is how `archiveCTFCategory` actually
+  hides a category, and 27 of 28 existing categories are hidden exactly this way.
 - `createCTFCategory` (`reg`, from CTFtime) and `createSpecialCTFCategory`
   (`reg-special`, manual) currently grant category `ViewChannel` to the **per-CTF role**
   and the **VIEW_ALL** role, plus a `ViewChannel: false` deny for `DENY_CTF_ROLEID`.
@@ -30,15 +33,21 @@ Category-level overwrites in each phase (live = `now < endtime`):
 
 | Role                              | Live (running)      | Ended (`now >= endtime`) |
 | --------------------------------- | ------------------- | ------------------------ |
+| `@everyone`                       | ❌ **deny**         | ❌ **deny** (stays)      |
 | Active role `1527199927447453756` | ✅ ViewChannel      | ✅ ViewChannel (kept)    |
 | Per-CTF role                      | ➖ not granted      | ✅ ViewChannel           |
 | VIEW_ALL role                     | ➖ not granted      | ✅ ViewChannel           |
 | DENY_CTF role                     | ❌ deny (kept)      | ❌ deny (kept)           |
 
-Because `@everyone` has no base View, "not granted" = invisible. The active-role grant
-is **kept** on revert (the existing grant-role command can still let a specific user view
-a specific ended CTF). Therefore the live→ended transition is **purely additive**: it
-adds the per-CTF and VIEW_ALL grants and removes nothing.
+Denying `@everyone` is what actually hides the category — without it, the base
+permission makes it visible to the whole server regardless of role grants. `@everyone`
+stays denied in **both** phases so access is always role-gated; the phases differ only
+in which roles are granted. This matches the state of the 27 existing archived
+categories (`@everyone` denied + per-CTF + VIEW_ALL granted).
+
+The active-role grant is **kept** on revert (the existing grant-role command can still
+let a specific user view a specific ended CTF). The live→ended transition is therefore
+**additive**: it adds the per-CTF and VIEW_ALL grants and removes nothing.
 
 ## Components
 
