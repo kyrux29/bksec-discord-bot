@@ -15,6 +15,7 @@ import path from 'path';
 
 const APPLY = process.argv.includes('--apply');
 const VIEW_CHANNEL = 1 << 10; // 1024
+const SEND_MESSAGES = 1 << 11; // 2048
 
 const token = process.env.BOT_TOKEN;
 const guildId = process.env.SERVER_ID;
@@ -45,6 +46,7 @@ interface CTFRow {
   name: string;
   role: string;
   cate: string;
+  channel: string;
   endtime: number;
   archived: number;
   channels_purged: number;
@@ -78,7 +80,7 @@ async function main() {
   }
 
   const rows = db
-    .prepare('SELECT id, name, role, cate, endtime, archived, channels_purged FROM ctfs')
+    .prepare('SELECT id, name, role, cate, channel, endtime, archived, channels_purged FROM ctfs')
     .all() as CTFRow[];
   const now = Math.floor(Date.now() / 1000);
 
@@ -126,6 +128,13 @@ async function main() {
         ).run(row.id);
         console.log(`[ENDED] ${row.name} — per-CTF + VIEW_ALL granted`);
         ended++;
+      }
+
+      // The info channel is deliberately public in BOTH phases: everyone can see
+      // and talk in it even while the challenge channels are gated.
+      if (row.channel && row.channel !== '0') {
+        await putOverwrite(row.channel, guildId!, VIEW_CHANNEL | SEND_MESSAGES, 0);
+        console.log(`         info channel -> public (view + send for @everyone)`);
       }
     } catch (err) {
       console.error(`[FAIL ] ${row.name} (cate ${row.cate}):`, err);

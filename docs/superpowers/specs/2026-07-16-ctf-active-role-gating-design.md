@@ -19,8 +19,15 @@ existing categories and all future ones, created via either creation path.
 - `createCTFCategory` (`reg`, from CTFtime) and `createSpecialCTFCategory`
   (`reg-special`, manual) currently grant category `ViewChannel` to the **per-CTF role**
   and the **VIEW_ALL** role, plus a `ViewChannel: false` deny for `DENY_CTF_ROLEID`.
-- Challenge channels are created without their own View overwrite, so they inherit the
-  category's visibility. Only category-level overwrites need to be managed.
+- Challenge channels are created without their own overwrites, so they stay **synced**
+  to the category and pick up its changes automatically. Verified live: after gating the
+  category, all six (`general`, `web`, `crypto`, `pwn`, `rev`, `forensics`) showed
+  `@everyone` denied.
+- **The info channel is the exception.** Giving it any overwrite at creation **desyncs**
+  it from the category, so category permission changes stop propagating to it. It is
+  therefore managed explicitly and is deliberately **public in both phases**:
+  `@everyone` gets `ViewChannel: true` + `SendMessages: true`, so anyone can see and
+  talk about a CTF even while its challenge channels are gated to the active role.
 - There is **no** background scheduler acting on `endtime`. The only `setInterval`
   (`ready.ts`) rotates the bot status. Archiving/unlisting is manual via commands.
 - `endtime` is stored in `ctfs` as epoch **seconds**. `getAllCTFs()` returns

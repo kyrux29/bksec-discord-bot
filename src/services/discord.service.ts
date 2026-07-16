@@ -51,15 +51,19 @@ class DiscordService {
 
       logger.info(`Created category: ${category.name}`);
 
-      // Create info channel (read-only for @everyone)
+      // Create info channel. Unlike the challenge channels it is deliberately
+      // public: everyone can see and talk in it even while the CTF is gated to
+      // the active role. Setting an overwrite here desyncs it from the category,
+      // which is what keeps the category's @everyone deny from hiding it.
       const infoChannel = await guild.channels.create({
         name: normalizedName,
         type: ChannelType.GuildText,
         parent: category.id,
       });
 
-      await infoChannel.permissionOverwrites.create(guild.roles.everyone, {
-        SendMessages: false,
+      await infoChannel.permissionOverwrites.edit(guild.roles.everyone, {
+        ViewChannel: true,
+        SendMessages: true,
       });
 
       logger.info(`Created info channel: ${infoChannel.name}`);
