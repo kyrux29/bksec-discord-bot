@@ -15,7 +15,6 @@ import path from 'path';
 
 const APPLY = process.argv.includes('--apply');
 const VIEW_CHANNEL = 1 << 10; // 1024
-const SEND_MESSAGES = 1 << 11; // 2048
 
 const token = process.env.BOT_TOKEN;
 const guildId = process.env.SERVER_ID;
@@ -68,6 +67,20 @@ async function deleteOverwrite(channelId: string, roleId: string) {
   } catch {
     // no such overwrite — fine
   }
+}
+
+/**
+ * Make a channel's overwrites exactly match its category's, i.e. what Discord
+ * calls "synced". A synced channel then tracks future category changes.
+ */
+async function syncToCategory(channelId: string, categoryId: string) {
+  const category = (await rest.get(Routes.channel(categoryId))) as {
+    permission_overwrites?: Array<{ id: string; type: number; allow: string; deny: string }>;
+  };
+  await rest.patch(Routes.channel(channelId), {
+    body: { permission_overwrites: category.permission_overwrites ?? [] },
+    reason: 'CTF active-role visibility migration: re-sync to category',
+  });
 }
 
 async function main() {
@@ -130,11 +143,13 @@ async function main() {
         ended++;
       }
 
-      // The info channel is deliberately public in BOTH phases: everyone can see
-      // and talk in it even while the challenge channels are gated.
+      // The info channel must carry NO overwrites of its own — any overwrite desyncs
+      // it from the category and it stops tracking the category's @everyone deny.
+      // Re-sync it by replacing its overwrite list with the category's, so whoever
+      // can see the category can both view and talk in it.
       if (row.channel && row.channel !== '0') {
-        await putOverwrite(row.channel, guildId!, VIEW_CHANNEL | SEND_MESSAGES, 0);
-        console.log(`         info channel -> public (view + send for @everyone)`);
+        await syncToCategory(row.channel, row.cate);
+        console.log(`         info channel -> re-synced to category`);
       }
     } catch (err) {
       console.error(`[FAIL ] ${row.name} (cate ${row.cate}):`, err);

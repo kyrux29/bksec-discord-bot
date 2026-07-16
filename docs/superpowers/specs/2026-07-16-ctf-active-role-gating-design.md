@@ -23,11 +23,12 @@ existing categories and all future ones, created via either creation path.
   to the category and pick up its changes automatically. Verified live: after gating the
   category, all six (`general`, `web`, `crypto`, `pwn`, `rev`, `forensics`) showed
   `@everyone` denied.
-- **The info channel is the exception.** Giving it any overwrite at creation **desyncs**
-  it from the category, so category permission changes stop propagating to it. It is
-  therefore managed explicitly and is deliberately **public in both phases**:
-  `@everyone` gets `ViewChannel: true` + `SendMessages: true`, so anyone can see and
-  talk about a CTF even while its challenge channels are gated to the active role.
+- **The info channel must also carry no overwrites**, for the same reason. The old code
+  gave it an `@everyone SendMessages: false` overwrite, which **desynced** it from the
+  category — so the category's `@everyone` deny never reached it and it fell back to
+  base permissions, visible server-wide *and* read-only. Both halves of that were wrong.
+  Synced, it is private exactly like the challenge channels, and whoever can see it
+  (active-role members) can also post in it.
 - There is **no** background scheduler acting on `endtime`. The only `setInterval`
   (`ready.ts`) rotates the bot status. Archiving/unlisting is manual via commands.
 - `endtime` is stored in `ctfs` as epoch **seconds**. `getAllCTFs()` returns
