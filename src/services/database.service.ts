@@ -107,6 +107,13 @@ class DatabaseService {
         // column already exists
       }
 
+      // Migrate: add post_end_opened column if not present
+      try {
+        this.db.exec('ALTER TABLE ctfs ADD COLUMN post_end_opened INTEGER NOT NULL DEFAULT 0');
+      } catch {
+        // column already exists
+      }
+
       // Initialize counter if not exists
       const counter = this.db.prepare('SELECT value FROM metadata WHERE key = ?').get('counter');
       if (!counter) {
@@ -178,7 +185,7 @@ class DatabaseService {
   /**
    * Add new CTF to database
    */
-  async addCTF(ctfData: Omit<CTFData, 'archived' | 'channelsPurged'>): Promise<number> {
+  async addCTF(ctfData: Omit<CTFData, 'archived' | 'channelsPurged' | 'postEndOpened'>): Promise<number> {
     try {
       // Get and increment counter
       const counter = this.db
@@ -259,6 +266,10 @@ class DatabaseService {
       if (updates.channelsPurged !== undefined) {
         setClauses.push('channels_purged = ?');
         values.push(updates.channelsPurged ? 1 : 0);
+      }
+      if (updates.postEndOpened !== undefined) {
+        setClauses.push('post_end_opened = ?');
+        values.push(updates.postEndOpened ? 1 : 0);
       }
 
       setClauses.push("updated_at = strftime('%s', 'now')");
@@ -591,6 +602,7 @@ class DatabaseService {
       endtime: row.endtime,
       archived: row.archived === 1,
       channelsPurged: row.channels_purged === 1,
+      postEndOpened: row.post_end_opened === 1,
     };
   }
 
