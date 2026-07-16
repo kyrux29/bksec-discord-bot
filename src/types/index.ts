@@ -9,6 +9,7 @@ export interface EnvConfig {
   SERVER_ID: string;
   BOT_TOKEN: string;
   VIEW_ALL_CTF_ROLEID: string;
+  ACTIVE_CTF_ROLEID: string;
   VERIFIED_ROLE_ID: string;
   ADMIN_ROLE_ID: string;
   TASK_ADMIN_CHANNEL_ID: string;

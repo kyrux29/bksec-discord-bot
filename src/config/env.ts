@@ -13,6 +13,7 @@ function validateEnv(): EnvConfig {
     'SERVER_ID',
     'BOT_TOKEN',
     'VIEW_ALL_CTF_ROLEID',
+    'ACTIVE_CTF_ROLEID',
     'VERIFIED_ROLE_ID',
     // TODO: RE-ENABLE — task commands temporarily disabled. Uncomment these
     // when the task env vars are set in .env, and also restore the imports/
@@ -45,6 +46,7 @@ function validateEnv(): EnvConfig {
     SERVER_ID: process.env.SERVER_ID!,
     BOT_TOKEN: process.env.BOT_TOKEN!,
     VIEW_ALL_CTF_ROLEID: process.env.VIEW_ALL_CTF_ROLEID!,
+    ACTIVE_CTF_ROLEID: process.env.ACTIVE_CTF_ROLEID!,
     VERIFIED_ROLE_ID: process.env.VERIFIED_ROLE_ID!,
     ADMIN_ROLE_ID: process.env.ADMIN_ROLE_ID ?? '',
     TASK_ADMIN_CHANNEL_ID: process.env.TASK_ADMIN_CHANNEL_ID ?? '',
