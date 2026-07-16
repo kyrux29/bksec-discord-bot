@@ -5,7 +5,7 @@ const runTestsByPathIndex = args.indexOf('--runTestsByPath');
 const testFiles =
   runTestsByPathIndex >= 0
     ? args.slice(runTestsByPathIndex + 1).filter((arg) => !arg.startsWith('--'))
-    : ['src/tests/ctftime.test.ts', 'src/tests/task-database.test.ts'];
+    : ['src/tests/ctftime.test.ts', 'src/tests/task-database.test.ts', 'src/tests/ctf-visibility.test.ts'];
 
 if (testFiles.length === 0) {
   throw new Error('--runTestsByPath requires at least one test path');
