@@ -1,6 +1,7 @@
 import { SlashCommandBuilder, ChatInputCommandInteraction, TextChannel } from 'discord.js';
 import { Command } from '../../types';
 import databaseService from '../../services/database.service';
+import discordService from '../../services/discord.service';
 import { successEmbed, errorEmbed } from '../../utils/embed.builder';
 import logger from '../../utils/logger';
 import { config } from '../../config/env';
@@ -43,7 +44,9 @@ const command: Command = {
         }
       }
 
-      const msg = `Fixed ${fixedCount} archived CTF info channel(s).` +
+      const reverted = await discordService.syncEndedCTFs(interaction.guild);
+
+      const msg = `Fixed ${fixedCount} archived CTF info channel(s). Reverted ${reverted} ended CTF(s) to normal visibility.` +
         (errors.length > 0 ? `\nFailed: ${errors.join(', ')}` : '');
 
       await interaction.editReply({ embeds: [successEmbed(msg)] });

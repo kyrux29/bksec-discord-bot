@@ -57,6 +57,8 @@ const command: Command = {
         endtime: endTime,
       });
 
+      await discordService.syncEndedCTFs(interaction.guild);
+
       await interaction.editReply({
         embeds: [
           successEmbed(

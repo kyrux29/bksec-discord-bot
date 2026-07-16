@@ -79,6 +79,9 @@ const command: Command = {
           endtime: ctfInfo.endTime,
         });
 
+        // Revert any CTFs whose time has run out
+        await discordService.syncEndedCTFs(interaction.guild);
+
         await interaction.editReply({
           embeds: [successEmbed(`Đã tạo channel cho <***${ctfInfo.title}***>`)],
         });
