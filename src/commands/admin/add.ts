@@ -5,6 +5,7 @@ import discordService from '../../services/discord.service';
 import { successEmbed, errorEmbed, warningEmbed } from '../../utils/embed.builder';
 import logger from '../../utils/logger';
 import { config } from '../../config/env';
+import { requireAdmin } from '../../utils/role.guard';
 
 const command: Command = {
   data: new SlashCommandBuilder()
@@ -21,6 +22,8 @@ const command: Command = {
 
   async execute(interaction: ChatInputCommandInteraction) {
     try {
+      if (!(await requireAdmin(interaction))) return;
+
       if (!interaction.guild || !interaction.channel) {
         await interaction.reply({ embeds: [errorEmbed('This command must be used in a server')], ephemeral: true });
         return;

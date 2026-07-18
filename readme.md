@@ -15,6 +15,8 @@ Hweplir is a Discord bot for managing CTF participation in one server. It is wri
 - Provides admin utilities for deleting, importing, fixing, and permission-locking CTF categories.
 - Provides verification commands for server roles.
 - Handles pagination and confirmation buttons for interactive commands.
+- Tracks challenge threads, claims, status, solves, points, writeups, and a pinned live dashboard.
+- Sends persisted CTF reminders and refreshes countdowns every five minutes.
 - Logs bot activity and errors with Winston.
 
 ## Commands
@@ -35,6 +37,7 @@ Hweplir is a Discord bot for managing CTF participation in one server. It is wri
 | --- | --- |
 | `/c-list` | List registered CTFs from the local database. |
 | `/c-view` | Toggle access to a registered CTF category by adding/removing its role. |
+| `/solve` | Mark the current challenge thread as solved and announce the solved roster. |
 | `/whoami` | Show bot information and runtime statistics. |
 | `/enroll-htba` | Enroll for access to BKSEC HTB Academy sharing. |
 
@@ -63,7 +66,6 @@ Required environment variables:
 SERVER_ID=discord_guild_id
 BOT_TOKEN=discord_bot_token
 VIEW_ALL_CTF_ROLEID=role_that_can_view_all_ctfs
-VERIFIED_ROLE_ID=verified_member_role
 ```
 
 Optional environment variables:
@@ -71,6 +73,10 @@ Optional environment variables:
 ```env
 LOG_CHANNELID=channel_for_bot_logs
 DENY_CTF_ROLEID=role_blocked_from_ctf_categories
+VERIFIED_ROLE_ID=only_needed_when_htb_enrollment_is_re-enabled
+GITHUB_TOKEN=only_needed_when_github_invites_are_re-enabled
+GH_INVITE_REPO_OWNER=only_needed_when_github_invites_are_re-enabled
+GH_INVITE_REPO_NAME=only_needed_when_github_invites_are_re-enabled
 ```
 
 ## Run the bot

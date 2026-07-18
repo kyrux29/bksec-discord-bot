@@ -10,11 +10,30 @@ Available to all server members.
 
 | Command | Description | Options |
 |---------|-------------|---------|
-| `/enroll-htba` | Enroll to get access to BKSEC's HTB Academy account sharing | — |
 | `/whoami` | Display bot info: uptime, memory usage, CTF counts | — |
 | `/c-list` | List all CTFs registered in the server | `order` (Mới nhất / Cũ nhất), `page`, `step` |
 | `/c-view` | Toggle visibility of a CTF's discussion channels (add/remove role) | `ctf-name` *(role, required)* |
-| `/invite-repo-wu-gcsb` | Invite a GitHub user as collaborator to the writeup repo | `github_username` *(required)* |
+| `/solve` | Mark the current challenge thread as solved and announce the CTF solved list | `members` *(mentions or Discord IDs, required)* |
+| `/challenge create` | Create a tracked challenge thread | `name`, `category`, `points` |
+| `/challenge claim` | Join the claimant list for the current challenge | — |
+| `/challenge release` | Remove yourself from the claimant list | — |
+| `/challenge status` | Set working/idea/unclaimed status | `value` |
+| `/challenge dashboard` | Create or refresh the pinned CTF dashboard | — |
+| `/writeup claim` | Claim the writeup task created after a solve | — |
+| `/writeup submit` | Submit the writeup or pull-request URL | `url` |
+
+### `/solve` behavior
+
+- Must be run inside a thread under a registered CTF category.
+- Requires `ACTIVE_CTF_ROLEID` (Discord administrators are also accepted).
+- Supports an optional `points` override, tracks category first blood, and stores the solve in SQLite.
+- Renames the thread with `[SOLVED]`, refreshes the pinned dashboard, and opens a writeup task.
+- A five-minute scheduler sends 24h/1h/start/3h-left/1h-left/end reminders and refreshes the countdown dashboard.
+- CTF registration creates and pins the dashboard in the CTF-named info channel immediately.
+- Completed challenges, completed writeups, and lifecycle reminders are posted to the dedicated `announcements` channel; discussion stays in `general`.
+- The dashboard title includes current progress as `solved/total`.
+- A member's first message in a challenge thread automatically joins them to its multi-user claimant list. Manually-created threads inside a registered CTF category are registered automatically on that first message.
+- Thread names use standardized states: `[OPEN]`, `[ACTIVE]`, `[LEAD]`, and `[SOLVED]`.
 
 ### `/c-list` options
 
@@ -23,14 +42,6 @@ Available to all server members.
 | `order` | Choice | Mới nhất | Sort order: newest first or oldest first |
 | `page` | Integer | 1 | Page number |
 | `step` | Integer | 5 | Results per page |
-
-### `/invite-repo-wu-gcsb` notes
-
-- Sends a GitHub collaborator invitation with `push` access to the configured repo.
-- Validates username format (alphanumeric + hyphens, 1–39 chars, cannot start with a hyphen).
-- Handles: already a collaborator, user not found (404), permission errors (401/403), and invalid input (422).
-- Reply is ephemeral (only visible to the invoker).
-- **Note:** role check is temporarily disabled; any server member can use this command.
 
 ---
 
@@ -84,6 +95,7 @@ Restricted to users with the configured admin role or Discord Administrator perm
 | `/admin-deny-role` | Apply `ViewChannel: false` for `DENY_CTF_ROLEID` across all CTF categories | — |
 | `/admin-fix` | Fix info channel permissions for archived CTFs (sets everyone deny) | — |
 | `/admin-reg_special` | Register a CTF that is not on CTFTime (manual setup) | `name`, `hide_after` *(days, required)* |
+| `/admin-unsolve` | Undo an accidental solve in the current challenge thread | — |
 | `/verifyg10` | Verify a user into G10: swap guest role for member role | `user` *(required)* |
 
 ### `/admin-delete` flow
@@ -152,14 +164,14 @@ These commands are fully implemented but currently disabled until the required e
 | `BOT_TOKEN` | Yes | Bot login |
 | `GUILD_ID` | Yes | Command deployment |
 | `CLIENT_ID` | Yes | Command deployment |
-| `VERIFIED_ROLE_ID` | Yes | `invite-repo-wu-gcsb` role check (currently bypassed) |
-| `GITHUB_TOKEN` | Yes | GitHub collaborator invite |
-| `GH_INVITE_REPO_OWNER` | Yes | GitHub collaborator invite |
-| `GH_INVITE_REPO_NAME` | Yes | GitHub collaborator invite |
+| `VERIFIED_ROLE_ID` | No / disabled | HTB enrollment is temporarily disabled |
+| `GITHUB_TOKEN` | No / disabled | GitHub integration is temporarily disabled |
+| `GH_INVITE_REPO_OWNER` | No / disabled | GitHub integration is temporarily disabled |
+| `GH_INVITE_REPO_NAME` | No / disabled | GitHub integration is temporarily disabled |
 | `VIEW_ALL_CTF_ROLEID` | Yes | CTF channel visibility |
 | `LOG_CHANNELID` | No | Audit log channel |
 | `DENY_CTF_ROLEID` | No | `admin-deny-role` command |
-| `ADMIN_ROLE_ID` | Task only | Task admin gate |
+| `ADMIN_ROLE_ID` | Yes | All `/admin-*` commands and destructive confirmation buttons |
 | `TASK_ADMIN_CHANNEL_ID` | Task only | Task submission notifications |
 | `TASK_ROLE_PWN` | Task only | Role granted on pwn task solve |
 | `TASK_ROLE_REV` | Task only | Role granted on rev task solve |

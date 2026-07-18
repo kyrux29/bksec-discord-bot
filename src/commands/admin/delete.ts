@@ -3,6 +3,7 @@ import { Command } from '../../types';
 import databaseService from '../../services/database.service';
 import { errorEmbed, warningEmbed } from '../../utils/embed.builder';
 import logger from '../../utils/logger';
+import { requireAdmin } from '../../utils/role.guard';
 
 const command: Command = {
   data: new SlashCommandBuilder()
@@ -17,6 +18,8 @@ const command: Command = {
 
   async execute(interaction: ChatInputCommandInteraction) {
     try {
+      if (!(await requireAdmin(interaction))) return;
+
       if (!interaction.guild) {
         await interaction.reply({ embeds: [errorEmbed('This command must be used in a server')], ephemeral: true });
         return;
@@ -40,7 +43,7 @@ const command: Command = {
 
       // Show confirmation buttons
       const { DeleteConfirmButtons } = await import('../../components/buttons');
-      const view = new DeleteConfirmButtons(ctf.data.name, ctf.key, interaction.guild);
+      const view = new DeleteConfirmButtons(ctf.key, interaction.user.id);
 
       await interaction.editReply({
         embeds: [

@@ -7,6 +7,10 @@ import {
   TaskSubmission,
   TaskSubmissionHistory,
   TaskWithSubmissions,
+  SolvedChallenge,
+  CTFChallenge,
+  ChallengeCategory,
+  ChallengeStatus,
 } from '../types';
 import logger from '../utils/logger';
 
@@ -98,6 +102,59 @@ class DatabaseService {
         CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_thread_id_unique ON tasks(thread_id);
         CREATE INDEX IF NOT EXISTS idx_task_submissions_task_id ON task_submissions(task_id);
         CREATE INDEX IF NOT EXISTS idx_task_submission_history_submission_id ON task_submission_history(submission_id);
+
+        CREATE TABLE IF NOT EXISTS solved_challenges (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          ctf_id INTEGER NOT NULL,
+          thread_id TEXT NOT NULL UNIQUE,
+          challenge_name TEXT NOT NULL,
+          solver_ids TEXT NOT NULL,
+          solved_by TEXT NOT NULL,
+          solved_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+          FOREIGN KEY(ctf_id) REFERENCES ctfs(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_solved_challenges_ctf_id
+          ON solved_challenges(ctf_id);
+
+        CREATE TABLE IF NOT EXISTS ctf_challenges (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          ctf_id INTEGER NOT NULL,
+          thread_id TEXT NOT NULL UNIQUE,
+          channel_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          category TEXT NOT NULL,
+          points INTEGER NOT NULL DEFAULT 0,
+          status TEXT NOT NULL DEFAULT 'unclaimed',
+          claimed_by TEXT,
+          claimed_at INTEGER,
+          claimant_ids TEXT NOT NULL DEFAULT '[]',
+          solver_ids TEXT NOT NULL DEFAULT '[]',
+          solved_by TEXT,
+          solved_at INTEGER,
+          writeup_owner TEXT,
+          writeup_url TEXT,
+          created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+          updated_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+          FOREIGN KEY(ctf_id) REFERENCES ctfs(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_ctf_challenges_ctf_id ON ctf_challenges(ctf_id);
+
+        CREATE TABLE IF NOT EXISTS ctf_dashboards (
+          ctf_id INTEGER PRIMARY KEY,
+          channel_id TEXT NOT NULL,
+          message_id TEXT NOT NULL,
+          updated_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+          FOREIGN KEY(ctf_id) REFERENCES ctfs(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS ctf_reminders (
+          ctf_id INTEGER NOT NULL,
+          milestone TEXT NOT NULL,
+          sent_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+          PRIMARY KEY(ctf_id, milestone),
+          FOREIGN KEY(ctf_id) REFERENCES ctfs(id) ON DELETE CASCADE
+        );
       `);
 
       // Migrate: add channels_purged column if not present
@@ -113,6 +170,17 @@ class DatabaseService {
       } catch {
         // column already exists
       }
+      try { this.db.exec('ALTER TABLE ctfs ADD COLUMN starttime INTEGER NOT NULL DEFAULT 0'); } catch {}
+      try { this.db.exec('ALTER TABLE ctfs ADD COLUMN competition_endtime INTEGER NOT NULL DEFAULT 0'); } catch {}
+      try { this.db.exec('ALTER TABLE ctf_challenges ADD COLUMN claimed_at INTEGER'); } catch {}
+      try { this.db.exec("ALTER TABLE ctf_challenges ADD COLUMN claimant_ids TEXT NOT NULL DEFAULT '[]'"); } catch {}
+      this.db.exec(`
+        UPDATE ctf_challenges
+        SET claimant_ids = json_array(claimed_by)
+        WHERE claimed_by IS NOT NULL
+          AND claimed_by != ''
+          AND (claimant_ids IS NULL OR claimant_ids = '[]')
+      `);
 
       // Initialize counter if not exists
       const counter = this.db.prepare('SELECT value FROM metadata WHERE key = ?').get('counter');
@@ -125,6 +193,23 @@ class DatabaseService {
     } catch (error) {
       logger.error('Failed to ensure database schema:', error);
       throw new Error('Database initialization error');
+    }
+  }
+
+  /**
+   * Find CTF by internal database key
+   */
+  async findByKey(key: string): Promise<{ key: string; data: CTFData } | null> {
+    try {
+      const id = parseInt(key, 10);
+      if (!Number.isInteger(id)) return null;
+
+      const row = this.db.prepare('SELECT * FROM ctfs WHERE id = ?').get(id) as any;
+      if (!row) return null;
+      return { key: row.id.toString(), data: this.rowToCTFData(row) };
+    } catch (error) {
+      logger.error('Failed to find CTF by key:', error);
+      return null;
     }
   }
 
@@ -199,8 +284,8 @@ class DatabaseService {
       // Insert CTF
       this.db
         .prepare(
-          `INSERT INTO ctfs (id, ctftimeid, role, cate, name, infom, channel, endtime, archived)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO ctfs (id, ctftimeid, role, cate, name, infom, channel, endtime, archived, starttime, competition_endtime)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           newId,
@@ -211,7 +296,9 @@ class DatabaseService {
           ctfData.infom.toString(),
           ctfData.channel.toString(),
           ctfData.endtime,
-          0
+          0,
+          ctfData.starttime ?? 0,
+          ctfData.competitionEndtime ?? 0
         );
 
       logger.info(`CTF added to database: ${ctfData.name} (ID: ${newId})`);
@@ -271,6 +358,8 @@ class DatabaseService {
         setClauses.push('post_end_opened = ?');
         values.push(updates.postEndOpened ? 1 : 0);
       }
+      if (updates.starttime !== undefined) { setClauses.push('starttime = ?'); values.push(updates.starttime); }
+      if (updates.competitionEndtime !== undefined) { setClauses.push('competition_endtime = ?'); values.push(updates.competitionEndtime); }
 
       setClauses.push("updated_at = strftime('%s', 'now')");
       values.push(id);
@@ -393,6 +482,130 @@ class DatabaseService {
       .prepare("UPDATE ctfs SET channels_purged = 1, updated_at = strftime('%s', 'now') WHERE id = ?")
       .run(id);
     logger.info(`CTF marked as purged: ${key}`);
+  }
+
+  async upsertSolvedChallenge(input: {
+    ctfId: number;
+    threadId: string;
+    challengeName: string;
+    solverIds: string[];
+    solvedBy: string;
+  }): Promise<void> {
+    this.db.prepare(
+      `INSERT INTO solved_challenges
+        (ctf_id, thread_id, challenge_name, solver_ids, solved_by)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(thread_id) DO UPDATE SET
+         ctf_id = excluded.ctf_id,
+         challenge_name = excluded.challenge_name,
+         solver_ids = excluded.solver_ids,
+         solved_by = excluded.solved_by,
+         solved_at = strftime('%s','now')`
+    ).run(
+      input.ctfId,
+      input.threadId,
+      input.challengeName,
+      JSON.stringify(input.solverIds),
+      input.solvedBy
+    );
+  }
+
+  async getSolvedChallenges(ctfId: number): Promise<SolvedChallenge[]> {
+    const rows = this.db.prepare(
+      'SELECT * FROM solved_challenges WHERE ctf_id = ? ORDER BY solved_at ASC, id ASC'
+    ).all(ctfId) as any[];
+
+    return rows.map((row) => ({
+      id: row.id,
+      ctfId: row.ctf_id,
+      threadId: row.thread_id,
+      challengeName: row.challenge_name,
+      solverIds: JSON.parse(row.solver_ids) as string[],
+      solvedBy: row.solved_by,
+      solvedAt: row.solved_at,
+    }));
+  }
+
+  async createChallenge(input: { ctfId: number; threadId: string; channelId: string; name: string; category: ChallengeCategory; points: number }): Promise<CTFChallenge> {
+    const result = this.db.prepare(`INSERT INTO ctf_challenges (ctf_id,thread_id,channel_id,name,category,points) VALUES (?,?,?,?,?,?)`)
+      .run(input.ctfId, input.threadId, input.channelId, input.name, input.category, input.points);
+    return this.getChallengeById(Number(result.lastInsertRowid)) as Promise<CTFChallenge>;
+  }
+
+  async getChallengeById(id: number): Promise<CTFChallenge | null> {
+    const row = this.db.prepare('SELECT * FROM ctf_challenges WHERE id = ?').get(id) as any;
+    return row ? this.rowToChallenge(row) : null;
+  }
+
+  async getChallengeByThread(threadId: string): Promise<CTFChallenge | null> {
+    const row = this.db.prepare('SELECT * FROM ctf_challenges WHERE thread_id = ?').get(threadId) as any;
+    return row ? this.rowToChallenge(row) : null;
+  }
+
+  async getChallengesByCTF(ctfId: number): Promise<CTFChallenge[]> {
+    const rows = this.db.prepare('SELECT * FROM ctf_challenges WHERE ctf_id = ? ORDER BY category,name').all(ctfId) as any[];
+    return rows.map((row) => this.rowToChallenge(row));
+  }
+
+  async updateChallenge(id: number, updates: Partial<Pick<CTFChallenge, 'status'|'claimantIds'|'claimedBy'|'claimedAt'|'points'|'solverIds'|'solvedBy'|'solvedAt'|'writeupOwner'|'writeupUrl'>>): Promise<CTFChallenge> {
+    const map: Record<string,string> = { status:'status', claimantIds:'claimant_ids', claimedBy:'claimed_by', claimedAt:'claimed_at', points:'points', solverIds:'solver_ids', solvedBy:'solved_by', solvedAt:'solved_at', writeupOwner:'writeup_owner', writeupUrl:'writeup_url' };
+    const sets: string[] = []; const values: unknown[] = [];
+    for (const [key, column] of Object.entries(map)) {
+      if (key in updates) { sets.push(`${column} = ?`); const value = (updates as any)[key]; values.push(key === 'solverIds' || key === 'claimantIds' ? JSON.stringify(value) : value ?? null); }
+    }
+    sets.push("updated_at = strftime('%s','now')"); values.push(id);
+    this.db.prepare(`UPDATE ctf_challenges SET ${sets.join(',')} WHERE id = ?`).run(...values);
+    const challenge = await this.getChallengeById(id); if (!challenge) throw new Error('Challenge not found'); return challenge;
+  }
+
+  async addChallengeClaimant(id: number, userId: string): Promise<{ challenge: CTFChallenge; added: boolean }> {
+    const transaction = this.db.transaction(() => {
+      const row = this.db.prepare('SELECT * FROM ctf_challenges WHERE id = ?').get(id) as any;
+      if (!row) throw new Error('Challenge not found');
+      const claimantIds = JSON.parse(row.claimant_ids || '[]') as string[];
+      if (claimantIds.includes(userId)) return { challenge: this.rowToChallenge(row), added: false };
+      claimantIds.push(userId);
+      this.db.prepare(`UPDATE ctf_challenges SET claimant_ids = ?, claimed_at = COALESCE(claimed_at, strftime('%s','now')), status = CASE WHEN status = 'unclaimed' THEN 'working' ELSE status END, updated_at = strftime('%s','now') WHERE id = ?`)
+        .run(JSON.stringify(claimantIds), id);
+      const updated = this.db.prepare('SELECT * FROM ctf_challenges WHERE id = ?').get(id) as any;
+      return { challenge: this.rowToChallenge(updated), added: true };
+    });
+    return transaction();
+  }
+
+  async removeChallengeClaimant(id: number, userId: string): Promise<{ challenge: CTFChallenge; removed: boolean }> {
+    const transaction = this.db.transaction(() => {
+      const row = this.db.prepare('SELECT * FROM ctf_challenges WHERE id = ?').get(id) as any;
+      if (!row) throw new Error('Challenge not found');
+      const claimantIds = JSON.parse(row.claimant_ids || '[]') as string[];
+      const next = claimantIds.filter((id) => id !== userId);
+      if (next.length === claimantIds.length) return { challenge: this.rowToChallenge(row), removed: false };
+      this.db.prepare(`UPDATE ctf_challenges SET claimant_ids = ?, claimed_at = CASE WHEN ? = 0 THEN NULL ELSE claimed_at END, status = CASE WHEN ? = 0 AND status != 'solved' THEN 'unclaimed' ELSE status END, updated_at = strftime('%s','now') WHERE id = ?`)
+        .run(JSON.stringify(next), next.length, next.length, id);
+      const updated = this.db.prepare('SELECT * FROM ctf_challenges WHERE id = ?').get(id) as any;
+      return { challenge: this.rowToChallenge(updated), removed: true };
+    });
+    return transaction();
+  }
+
+  async deleteChallengeByThread(threadId: string): Promise<void> {
+    this.db.prepare('DELETE FROM ctf_challenges WHERE thread_id = ?').run(threadId);
+  }
+  async deleteChallengeSolveRecord(threadId: string): Promise<void> {
+    this.db.prepare('DELETE FROM solved_challenges WHERE thread_id = ?').run(threadId);
+  }
+
+  async getDashboard(ctfId: number): Promise<{channelId:string;messageId:string}|null> {
+    const row = this.db.prepare('SELECT channel_id,message_id FROM ctf_dashboards WHERE ctf_id=?').get(ctfId) as any;
+    return row ? { channelId: row.channel_id, messageId: row.message_id } : null;
+  }
+
+  async setDashboard(ctfId: number, channelId: string, messageId: string): Promise<void> {
+    this.db.prepare(`INSERT INTO ctf_dashboards(ctf_id,channel_id,message_id) VALUES(?,?,?) ON CONFLICT(ctf_id) DO UPDATE SET channel_id=excluded.channel_id,message_id=excluded.message_id,updated_at=strftime('%s','now')`).run(ctfId,channelId,messageId);
+  }
+
+  async markReminderSent(ctfId: number, milestone: string): Promise<boolean> {
+    return this.db.prepare('INSERT OR IGNORE INTO ctf_reminders(ctf_id,milestone) VALUES(?,?)').run(ctfId,milestone).changes > 0;
   }
 
   async createTask(input: {
@@ -603,7 +816,18 @@ class DatabaseService {
       archived: row.archived === 1,
       channelsPurged: row.channels_purged === 1,
       postEndOpened: row.post_end_opened === 1,
+      starttime: row.starttime ?? 0,
+      competitionEndtime: row.competition_endtime ?? 0,
     };
+  }
+
+  private rowToChallenge(row: any): CTFChallenge {
+    return { id:row.id, ctfId:row.ctf_id, threadId:row.thread_id, channelId:row.channel_id, name:row.name,
+      category:row.category as ChallengeCategory, points:row.points, status:row.status as ChallengeStatus,
+      claimantIds:JSON.parse(row.claimant_ids || (row.claimed_by ? JSON.stringify([row.claimed_by]) : '[]')),
+      claimedBy:row.claimed_by ?? undefined, claimedAt:row.claimed_at ?? undefined, solverIds:JSON.parse(row.solver_ids || '[]'), solvedBy:row.solved_by ?? undefined,
+      solvedAt:row.solved_at ?? undefined, writeupOwner:row.writeup_owner ?? undefined, writeupUrl:row.writeup_url ?? undefined,
+      createdAt:row.created_at, updatedAt:row.updated_at };
   }
 
   /**

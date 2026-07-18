@@ -36,6 +36,43 @@ export interface CTFData {
   archived: boolean;
   channelsPurged: boolean;
   postEndOpened: boolean;
+  starttime?: number;
+  competitionEndtime?: number;
+}
+
+export type ChallengeCategory = 'web' | 'pwn' | 'crypto' | 'rev' | 'forensics' | 'misc';
+export type ChallengeStatus = 'unclaimed' | 'working' | 'idea' | 'solved';
+
+export interface CTFChallenge {
+  id: number;
+  ctfId: number;
+  threadId: string;
+  channelId: string;
+  name: string;
+  category: ChallengeCategory;
+  points: number;
+  status: ChallengeStatus;
+  claimantIds: string[];
+  /** Legacy single-claim field retained for migration compatibility. */
+  claimedBy?: string;
+  claimedAt?: number;
+  solverIds: string[];
+  solvedBy?: string;
+  solvedAt?: number;
+  writeupOwner?: string;
+  writeupUrl?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface SolvedChallenge {
+  id: number;
+  ctfId: number;
+  threadId: string;
+  challengeName: string;
+  solverIds: string[];
+  solvedBy: string;
+  solvedAt: number;
 }
 
 export type TaskCategory = 'pwn' | 'rev' | 'crypto' | 'all';

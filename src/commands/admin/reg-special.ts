@@ -5,6 +5,8 @@ import discordService from '../../services/discord.service';
 import { successEmbed, errorEmbed } from '../../utils/embed.builder';
 import logger from '../../utils/logger';
 import { config } from '../../config/env';
+import { requireAdmin } from '../../utils/role.guard';
+import challengeService from '../../services/challenge.service';
 
 const command: Command = {
   data: new SlashCommandBuilder()
@@ -23,6 +25,8 @@ const command: Command = {
 
   async execute(interaction: ChatInputCommandInteraction) {
     try {
+      if (!(await requireAdmin(interaction))) return;
+
       if (!interaction.guild) {
         await interaction.reply({ embeds: [errorEmbed('This command must be used in a server')], ephemeral: true });
         return;
@@ -41,21 +45,32 @@ const command: Command = {
         return;
       }
 
-      const { category, role, generalChannel } = created;
+      const { category, role, infoChannel, generalChannel } = created;
 
       // Calculate end time (current time + days)
       const endTime = Math.floor(Date.now() / 1000) + 86400 * days;
 
       // Add CTF to database
-      await databaseService.addCTF({
+      const databaseId = await databaseService.addCTF({
         ctftimeid: 0,
         role: role.id,
         cate: category.id,
         name: name.trim(),
         infom: '0',
-        channel: '0',
+        channel: infoChannel.id,
         endtime: endTime,
+        starttime: Math.floor(Date.now() / 1000),
+        competitionEndtime: endTime,
       });
+
+      const registeredCTF = await databaseService.findByKey(databaseId.toString());
+      if (registeredCTF) {
+        await challengeService.refreshDashboard(
+          interaction.guild,
+          registeredCTF.key,
+          registeredCTF.data
+        );
+      }
 
       // Revert any CTFs whose time has run out
       await discordService.syncEndedCTFs(interaction.guild);
@@ -63,7 +78,7 @@ const command: Command = {
       await interaction.editReply({
         embeds: [
           successEmbed(
-            `Đã tạo channel cho <***${name}***>\nVui lòng tự cung cấp info giải CTF vào <#${generalChannel.id}>`
+            `Đã tạo channel cho <***${name}***>\nVui lòng tự cung cấp info giải CTF vào <#${infoChannel.id}>. Thảo luận chung tại <#${generalChannel.id}>.`
           ),
         ],
       });

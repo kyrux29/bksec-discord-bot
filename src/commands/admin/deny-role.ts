@@ -3,6 +3,7 @@ import { Command } from '../../types';
 import databaseService from '../../services/database.service';
 import logger from '../../utils/logger';
 import { config } from '../../config/env';
+import { requireAdmin } from '../../utils/role.guard';
 
 const command: Command = {
   data: new SlashCommandBuilder()
@@ -11,6 +12,8 @@ const command: Command = {
 
   async execute(interaction: ChatInputCommandInteraction) {
     try {
+      if (!(await requireAdmin(interaction))) return;
+
       if (!interaction.guild) {
         await interaction.reply({ content: 'This command must be used in a server', ephemeral: true });
         return;

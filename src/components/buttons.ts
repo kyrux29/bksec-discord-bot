@@ -3,7 +3,6 @@ import {
   ButtonBuilder,
   ButtonStyle,
   ButtonInteraction,
-  Guild,
   TextChannel,
 } from 'discord.js';
 import ctftimeService from '../services/ctftime.service';
@@ -12,6 +11,7 @@ import discordService from '../services/discord.service';
 import { createEmbed, successEmbed, errorEmbed, warningEmbed } from '../utils/embed.builder';
 import logger from '../utils/logger';
 import { config } from '../config/env';
+import { isAdmin } from '../utils/role.guard';
 
 /**
  * Buttons for showing/hiding long ongoing CTFs
@@ -104,25 +104,21 @@ export class ListPaginationButtons extends ActionRowBuilder<ButtonBuilder> {
  * Confirmation buttons for deleting CTF
  */
 export class DeleteConfirmButtons extends ActionRowBuilder<ButtonBuilder> {
-  constructor(
-    _ctfName: string,
-    ctfKey: string,
-    _guild: Guild
-  ) {
+  constructor(ctfKey: string, requesterId: string) {
     super();
 
     const deleteAllButton = new ButtonBuilder()
-      .setCustomId(`delete_all_${ctfKey}`)
+      .setCustomId(`delete_all_${ctfKey}_${requesterId}`)
       .setLabel('Xoá tất cả')
       .setStyle(ButtonStyle.Primary);
 
     const keepChannelsButton = new ButtonBuilder()
-      .setCustomId(`delete_keep_${ctfKey}`)
+      .setCustomId(`delete_keep_${ctfKey}_${requesterId}`)
       .setLabel('Giữ lại channel')
       .setStyle(ButtonStyle.Primary);
 
     const cancelButton = new ButtonBuilder()
-      .setCustomId(`delete_cancel_${ctfKey}`)
+      .setCustomId(`delete_cancel_${ctfKey}_${requesterId}`)
       .setLabel('Huỷ')
       .setStyle(ButtonStyle.Secondary);
 
@@ -224,7 +220,16 @@ export async function handleButtonInteraction(interaction: ButtonInteraction) {
     if (customId.startsWith('delete_all_') || customId.startsWith('delete_keep_') || customId.startsWith('delete_cancel_')) {
       const parts = customId.split('_');
       const action = parts[1]; // 'all', 'keep', or 'cancel'
-      const ctfKey = parts.slice(2).join('_'); // Rejoin in case key contains underscores
+      const ctfKey = parts[2];
+      const requesterId = parts[3];
+
+      if (!interaction.guild || interaction.user.id !== requesterId || !(await isAdmin(interaction))) {
+        await interaction.reply({
+          embeds: [errorEmbed('You do not have permission to perform this action')],
+          ephemeral: true,
+        });
+        return;
+      }
 
       if (action === 'cancel') {
         await interaction.update({
@@ -234,20 +239,57 @@ export async function handleButtonInteraction(interaction: ButtonInteraction) {
         return;
       }
 
-      if (!interaction.guild) return;
+      await interaction.deferUpdate();
 
-      const ctfData = await databaseService.deleteCTF(ctfKey);
-
-      // Delete role
-      const role = interaction.guild.roles.cache.get(ctfData.role);
-      if (role) {
-        await role.delete();
+      const ctf = await databaseService.findByKey(ctfKey);
+      if (!ctf) {
+        await interaction.editReply({
+          embeds: [errorEmbed('CTF not found in database')],
+          components: [],
+        });
+        return;
       }
+      const ctfData = ctf.data;
 
       if (action === 'all') {
-        // Delete entire category and channels
-        await discordService.deleteCTFCategory(interaction.guild, ctfData.cate);
-        await interaction.update({
+        const categoryDeleted = await discordService.deleteCTFCategory(interaction.guild, ctfData.cate);
+        if (!categoryDeleted) {
+          await interaction.editReply({
+            embeds: [errorEmbed('Failed to delete Discord category. Database was not changed.')],
+            components: [],
+          });
+          return;
+        }
+      } else if (action === 'keep') {
+        const categoryUnlisted = await discordService.unlistCTFCategory(interaction.guild, ctfData.cate);
+        if (!categoryUnlisted) {
+          await interaction.editReply({
+            embeds: [errorEmbed('Failed to unlist Discord category. Database was not changed.')],
+            components: [],
+          });
+          return;
+        }
+      }
+
+      const role = await interaction.guild.roles.fetch(ctfData.role).catch(() => null);
+      if (role) {
+        try {
+          await role.delete('CTF removed through admin-delete');
+        } catch (error) {
+          logger.error(`Failed to delete role for ${ctfData.name}:`, error);
+          await interaction.editReply({
+            embeds: [errorEmbed('Discord category was updated, but role deletion failed. Database was kept so the operation can be retried.')],
+            components: [],
+          });
+          return;
+        }
+      }
+
+      // Discord is now in the requested state; only then remove persistent data.
+      await databaseService.deleteCTF(ctfKey);
+
+      if (action === 'all') {
+        await interaction.editReply({
           embeds: [successEmbed(`Toàn bộ dữ liệu của <***${ctfData.name}***> đã bị xoá`)],
           components: [],
         });
@@ -261,9 +303,7 @@ export async function handleButtonInteraction(interaction: ButtonInteraction) {
 
         logger.info(`User ${interaction.user.tag} deleted CTF (all): ${ctfData.name}`);
       } else if (action === 'keep') {
-        // Unlist category but keep channels
-        await discordService.unlistCTFCategory(interaction.guild, ctfData.cate);
-        await interaction.update({
+        await interaction.editReply({
           embeds: [successEmbed(`<***${ctfData.name}***> đã bị bỏ khỏi list`)],
           components: [],
         });

@@ -65,7 +65,7 @@ class DiscordService {
       logger.info(`Created info channel: ${infoChannel.name}`);
 
       // Create other challenge channels
-      const channelNames = ['general', 'web', 'crypto', 'pwn', 'rev', 'forensics'];
+      const channelNames = ['announcements', 'general', 'web', 'crypto', 'pwn', 'rev', 'forensics'];
 
       for (const channelName of channelNames) {
         await guild.channels.create({
@@ -92,6 +92,7 @@ class DiscordService {
   ): Promise<{
     category: CategoryChannel;
     role: Role;
+    infoChannel: TextChannel;
     generalChannel: TextChannel;
   } | null> {
     try {
@@ -117,9 +118,22 @@ class DiscordService {
 
       logger.info(`Created special category: ${category.name}`);
 
-      // Create general channel
-      const generalChannel = await guild.channels.create({
+      // Keep CTF information and its progress dashboard in a dedicated channel.
+      const infoChannel = await guild.channels.create({
         name: normalizedName,
+        type: ChannelType.GuildText,
+        parent: category.id,
+      });
+
+      // Create general discussion channel
+      const generalChannel = await guild.channels.create({
+        name: 'general',
+        type: ChannelType.GuildText,
+        parent: category.id,
+      });
+
+      await guild.channels.create({
+        name: 'announcements',
         type: ChannelType.GuildText,
         parent: category.id,
       });
@@ -135,7 +149,7 @@ class DiscordService {
         });
       }
 
-      return { category, role, generalChannel };
+      return { category, role, infoChannel, generalChannel };
     } catch (error) {
       logger.error('Error creating special CTF category:', error);
       return null;
@@ -147,10 +161,14 @@ class DiscordService {
    */
   async archiveCTFCategory(guild: Guild, categoryId: string, infoChannelId?: string): Promise<boolean> {
     try {
-      const category = guild.channels.cache.get(categoryId) as CategoryChannel;
+      const category = await guild.channels.fetch(categoryId).catch(() => null);
 
       if (!category) {
         logger.warn(`Category not found: ${categoryId}`);
+        return false;
+      }
+      if (category.type !== ChannelType.GuildCategory) {
+        logger.warn(`Channel is not a category: ${categoryId}`);
         return false;
       }
 
@@ -183,10 +201,14 @@ class DiscordService {
    */
   async deleteCTFCategory(guild: Guild, categoryId: string): Promise<boolean> {
     try {
-      const category = guild.channels.cache.get(categoryId) as CategoryChannel;
+      const category = await guild.channels.fetch(categoryId).catch(() => null);
 
       if (!category) {
-        logger.warn(`Category not found: ${categoryId}`);
+        logger.info(`Category already absent: ${categoryId}`);
+        return true;
+      }
+      if (category.type !== ChannelType.GuildCategory) {
+        logger.warn(`Channel is not a category: ${categoryId}`);
         return false;
       }
 
@@ -219,7 +241,9 @@ class DiscordService {
         return false;
       }
 
-      await category.setName(`[UNLISTED] ${category.name}`);
+      if (!category.name.startsWith('[UNLISTED]')) {
+        await category.setName(`[UNLISTED] ${category.name}`);
+      }
       await category.permissionOverwrites.create(guild.roles.everyone, {
         ViewChannel: true,
       });

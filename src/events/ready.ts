@@ -3,6 +3,7 @@ import { statuses } from '../data/statuses';
 import databaseService from '../services/database.service';
 import logger from '../utils/logger';
 import { config } from '../config/env';
+import ctfSchedulerService from '../services/ctf-scheduler.service';
 
 let statusIndex = 0;
 
@@ -31,6 +32,7 @@ export async function handleReady(client: Client) {
 
   // Start status rotation
   startStatusRotation(client);
+  ctfSchedulerService.start(client);
 
   logger.info('Bot is ready and all systems operational');
 }

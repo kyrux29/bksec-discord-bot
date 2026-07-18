@@ -6,6 +6,7 @@ import discordService from '../../services/discord.service';
 import { createEmbed, errorEmbed, successEmbed, warningEmbed } from '../../utils/embed.builder';
 import logger from '../../utils/logger';
 import { config } from '../../config/env';
+import challengeService from '../../services/challenge.service';
 
 const command: Command = {
   data: new SlashCommandBuilder()
@@ -69,7 +70,7 @@ const command: Command = {
         await message.pin();
 
         // Add CTF to database
-        await databaseService.addCTF({
+        const databaseId = await databaseService.addCTF({
           ctftimeid: ctftimeId,
           role: role.id,
           cate: category.id,
@@ -77,7 +78,18 @@ const command: Command = {
           infom: message.id,
           channel: infoChannel.id,
           endtime: ctfInfo.endTime,
+          starttime: ctfInfo.startTime,
+          competitionEndtime: ctfInfo.endTime - 604800,
         });
+
+        const registeredCTF = await databaseService.findByKey(databaseId.toString());
+        if (registeredCTF) {
+          await challengeService.refreshDashboard(
+            interaction.guild,
+            registeredCTF.key,
+            registeredCTF.data
+          );
+        }
 
         // Revert any CTFs whose time has run out
         await discordService.syncEndedCTFs(interaction.guild);

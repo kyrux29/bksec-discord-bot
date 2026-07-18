@@ -14,19 +14,15 @@ function validateEnv(): EnvConfig {
     'BOT_TOKEN',
     'VIEW_ALL_CTF_ROLEID',
     'ACTIVE_CTF_ROLEID',
-    'VERIFIED_ROLE_ID',
+    'ADMIN_ROLE_ID',
     // TODO: RE-ENABLE — task commands temporarily disabled. Uncomment these
     // when the task env vars are set in .env, and also restore the imports/
     // registrations/handlers in src/index.ts.
-    // 'ADMIN_ROLE_ID',
     // 'TASK_ADMIN_CHANNEL_ID',
     // 'TASK_ROLE_PWN',
     // 'TASK_ROLE_REV',
     // 'TASK_ROLE_CRYPTO',
     // 'TASK_ROLE_ALL',
-    'GITHUB_TOKEN',
-    'GH_INVITE_REPO_OWNER',
-    'GH_INVITE_REPO_NAME',
   ];
   const missing: string[] = [];
 
@@ -47,7 +43,7 @@ function validateEnv(): EnvConfig {
     BOT_TOKEN: process.env.BOT_TOKEN!,
     VIEW_ALL_CTF_ROLEID: process.env.VIEW_ALL_CTF_ROLEID!,
     ACTIVE_CTF_ROLEID: process.env.ACTIVE_CTF_ROLEID!,
-    VERIFIED_ROLE_ID: process.env.VERIFIED_ROLE_ID!,
+    VERIFIED_ROLE_ID: process.env.VERIFIED_ROLE_ID ?? '',
     ADMIN_ROLE_ID: process.env.ADMIN_ROLE_ID ?? '',
     TASK_ADMIN_CHANNEL_ID: process.env.TASK_ADMIN_CHANNEL_ID ?? '',
     TASK_ROLE_PWN: process.env.TASK_ROLE_PWN ?? '',
@@ -56,9 +52,9 @@ function validateEnv(): EnvConfig {
     TASK_ROLE_ALL: process.env.TASK_ROLE_ALL ?? '',
     LOG_CHANNELID: process.env.LOG_CHANNELID,
     DENY_CTF_ROLEID: process.env.DENY_CTF_ROLEID,
-    GITHUB_TOKEN: process.env.GITHUB_TOKEN!,
-    GH_INVITE_REPO_OWNER: process.env.GH_INVITE_REPO_OWNER!,
-    GH_INVITE_REPO_NAME: process.env.GH_INVITE_REPO_NAME!,
+    GITHUB_TOKEN: process.env.GITHUB_TOKEN ?? '',
+    GH_INVITE_REPO_OWNER: process.env.GH_INVITE_REPO_OWNER ?? '',
+    GH_INVITE_REPO_NAME: process.env.GH_INVITE_REPO_NAME ?? '',
   };
 }
 
