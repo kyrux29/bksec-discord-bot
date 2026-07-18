@@ -46,9 +46,7 @@ export async function isAdmin(
   );
 }
 
-export async function requireAdmin(
-  interaction: ChatInputCommandInteraction
-): Promise<boolean> {
+export async function requireAdmin(interaction: ChatInputCommandInteraction): Promise<boolean> {
   if (await isAdmin(interaction)) return true;
 
   await interaction.reply({

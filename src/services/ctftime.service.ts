@@ -36,11 +36,7 @@ const elapsed = (start: number) => `${Date.now() - start}ms`;
 
 export class CTFTimeAPIError extends Error {
   constructor(public readonly statusCode?: number) {
-    super(
-      statusCode
-        ? `CTFtime API returned HTTP ${statusCode}`
-        : 'CTFtime API unreachable'
-    );
+    super(statusCode ? `CTFtime API returned HTTP ${statusCode}` : 'CTFtime API unreachable');
     this.name = 'CTFTimeAPIError';
   }
 }
@@ -53,9 +49,12 @@ class CTFTimeService {
   }
 
   private async fetchAllEvents(): Promise<{ data: CTFTimeEvent[]; stale: boolean }> {
-    if (this.isCacheValid()) {
-      logger.info(`Using cached events (age: ${Math.floor((Date.now() - this.cache!.timestamp) / 1000)}s)`);
-      return { data: this.cache!.data, stale: false };
+    const currentCache = this.cache;
+    if (currentCache && this.isCacheValid()) {
+      logger.info(
+        `Using cached events (age: ${Math.floor((Date.now() - currentCache.timestamp) / 1000)}s)`
+      );
+      return { data: currentCache.data, stale: false };
     }
 
     const t = Date.now();
@@ -99,11 +98,14 @@ class CTFTimeService {
       const fields: Array<{ name: string; value: string; inline?: boolean }> = [];
 
       if (creating) {
+        const safeUsername = username?.replace(/`/g, 'ˋ');
+        const safePassword = password?.replace(/\|/g, '∣');
         fields.push({
           name: 'Login',
-          value: username && password
-            ? `Username: ${username}\nPassword: ${password}`
-            : 'Đang đợi ai đó /regacc...',
+          value:
+            safeUsername && safePassword
+              ? `Username: \`${safeUsername}\`\nPassword: ||${safePassword}||`
+              : 'Đang chờ quản trị viên cập nhật bằng `/ct-regacc`.',
         });
       }
 
@@ -114,7 +116,12 @@ class CTFTimeService {
 
       fields.push({ name: 'Rating weight', value: data.weight.toString() });
 
-      const formattedFormat = formatCTFFormat(data.format, data.onsite, data.location, data.restrictions);
+      const formattedFormat = formatCTFFormat(
+        data.format,
+        data.onsite,
+        data.location,
+        data.restrictions
+      );
       if (formattedFormat) fields.push({ name: 'Format', value: formattedFormat });
 
       const discordLink = extractDiscordLink(data.description);
@@ -138,7 +145,8 @@ class CTFTimeService {
         return {
           title: data.title,
           startTime,
-          endTime: endTime + 604800,
+          endTime,
+          archiveAt: endTime + 7 * 24 * 60 * 60,
           embedData,
         };
       }
@@ -159,7 +167,9 @@ class CTFTimeService {
     try {
       const { data: events } = await this.fetchAllEvents();
       const match = events.find((ctf) => fuzzyMatch(searchKey, ctf.title));
-      logger.info(`findCTF "${searchKey}" — ${match ? `found ${match.id}` : 'not found'} in ${elapsed(t)}`);
+      logger.info(
+        `findCTF "${searchKey}" — ${match ? `found ${match.id}` : 'not found'} in ${elapsed(t)}`
+      );
       return match?.id ?? 0;
     } catch (error) {
       logger.error('Error searching for CTF:', error);
@@ -190,7 +200,11 @@ class CTFTimeService {
       for (let i = 0; i < pagination.itemsToShow; i++) {
         const ctf = upcoming[step * page + i];
         const startTimestamp = parseISOToTimestamp(ctf.start);
-        const endTimestamp = calculateEndTime(startTimestamp, ctf.duration.hours, ctf.duration.days);
+        const endTimestamp = calculateEndTime(
+          startTimestamp,
+          ctf.duration.hours,
+          ctf.duration.days
+        );
 
         const isLong = endTimestamp - startTimestamp > LONG_EVENT_SECONDS;
         if (isLong && !longWarning) longWarning = '⏰: Event(s) dài > 5 ngày';
@@ -235,7 +249,11 @@ class CTFTimeService {
 
       for (const ctf of events) {
         const startTimestamp = parseISOToTimestamp(ctf.start);
-        const endTimestamp = calculateEndTime(startTimestamp, ctf.duration.hours, ctf.duration.days);
+        const endTimestamp = calculateEndTime(
+          startTimestamp,
+          ctf.duration.hours,
+          ctf.duration.days
+        );
 
         if (startTimestamp >= now || now >= endTimestamp) continue;
 
@@ -290,9 +308,10 @@ class CTFTimeService {
 
       const fields = allCTFs.slice(step * page, step * page + pagination.itemsToShow).map((ctf) => {
         const emoji = ctf.data.channelsPurged ? '🗑️ ' : ctf.data.archived ? '📦 ' : '🟢 ';
-        const value = ctf.data.ctftimeid > 0
-          ? `\`CTFTime ID: ${ctf.data.ctftimeid}\``
-          : `\`Cate ID: ${ctf.data.cate}\``;
+        const value =
+          ctf.data.ctftimeid > 0
+            ? `\`CTFTime ID: ${ctf.data.ctftimeid}\``
+            : `\`Cate ID: ${ctf.data.cate}\``;
         return { name: emoji + ctf.data.name, value };
       });
 

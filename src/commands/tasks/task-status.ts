@@ -7,7 +7,9 @@ import { taskCategoryLabels } from '../../utils/task.constants';
 import { errorEmbed } from '../../utils/embed.builder';
 
 const command: Command = {
-  data: new SlashCommandBuilder().setName('task-status').setDescription('Show task submission status'),
+  data: new SlashCommandBuilder()
+    .setName('task-status')
+    .setDescription('Show task submission status'),
 
   async execute(interaction: ChatInputCommandInteraction) {
     if (!(await requireRole(interaction, config.ADMIN_ROLE_ID))) return;
@@ -28,7 +30,10 @@ const command: Command = {
 
       embed.addFields({
         name: `${task.name} (${taskCategoryLabels[task.category]})`,
-        value: `Revealed: ${task.revealed ? 'yes' : 'no'}\nSubmissions: ${submitters}`.slice(0, 1024),
+        value: `Revealed: ${task.revealed ? 'yes' : 'no'}\nSubmissions: ${submitters}`.slice(
+          0,
+          1024
+        ),
       });
     }
 

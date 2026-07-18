@@ -14,14 +14,20 @@ const command: Command = {
 
   async execute(interaction: ChatInputCommandInteraction) {
     if (!interaction.guild) {
-      await interaction.reply({ embeds: [errorEmbed('This command must be used in a server')], ephemeral: true });
+      await interaction.reply({
+        embeds: [errorEmbed('This command must be used in a server')],
+        ephemeral: true,
+      });
       return;
     }
 
     const tasks = await databaseService.getAllTasks();
 
     if (tasks.length === 0) {
-      await interaction.reply({ embeds: [errorEmbed('No tasks are available for submission')], ephemeral: true });
+      await interaction.reply({
+        embeds: [errorEmbed('No tasks are available for submission')],
+        ephemeral: true,
+      });
       return;
     }
 

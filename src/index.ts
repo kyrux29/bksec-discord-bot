@@ -1,4 +1,11 @@
-import { Client, GatewayIntentBits, Collection, REST, Routes, ChatInputCommandInteraction } from 'discord.js';
+import {
+  Client,
+  GatewayIntentBits,
+  Collection,
+  REST,
+  Routes,
+  ChatInputCommandInteraction,
+} from 'discord.js';
 import { config } from './config/env';
 import logger from './utils/logger';
 import { handleReady } from './events/ready';
@@ -83,9 +90,11 @@ const commands: Command[] = [
   adminDelete,
   adminAdd,
   adminDenyRole,
-  adminVerifyG10,
   adminFix,
   adminUnsolve,
+  ...(config.VERIFY_REMOVE_ROLE_ID && config.VERIFY_GRANT_ROLE_ID && config.VERIFY_ALLOWED_ROLE_ID
+    ? [adminVerifyG10]
+    : []),
   // TODO: RE-ENABLE TASK COMMANDS (see top of file)
   // taskIssue,
   // taskSubmit,
@@ -107,8 +116,10 @@ async function deployCommands() {
     const rest = new REST({ version: '10' }).setToken(config.BOT_TOKEN);
 
     const commandData = commands.map((cmd) => cmd.data.toJSON());
+    const applicationId = client.application?.id ?? client.user?.id;
+    if (!applicationId) throw new Error('Discord application ID is unavailable');
 
-    await rest.put(Routes.applicationGuildCommands(client.user!.id, config.SERVER_ID), {
+    await rest.put(Routes.applicationGuildCommands(applicationId, config.SERVER_ID), {
       body: commandData,
     });
 
@@ -142,17 +153,20 @@ client.on('interactionCreate', async (interaction) => {
       await command.execute(interaction as ChatInputCommandInteraction);
     } else if (interaction.isButton()) {
       await handleButtonInteraction(interaction);
-    // TODO: RE-ENABLE TASK COMMANDS — uncomment these handlers (see top of file)
-    // } else if (interaction.isStringSelectMenu()) {
-    //   await handleTaskSelectInteraction(interaction);
-    // } else if (interaction.isModalSubmit()) {
-    //   await handleTaskModalInteraction(interaction);
+      // TODO: RE-ENABLE TASK COMMANDS — uncomment these handlers (see top of file)
+      // } else if (interaction.isStringSelectMenu()) {
+      //   await handleTaskSelectInteraction(interaction);
+      // } else if (interaction.isModalSubmit()) {
+      //   await handleTaskModalInteraction(interaction);
     }
   } catch (error) {
     logger.error('Error handling interaction:', error);
 
     if (interaction.isRepliable()) {
-      const errorMessage = { content: 'There was an error executing this command!', ephemeral: true };
+      const errorMessage = {
+        content: 'There was an error executing this command!',
+        ephemeral: true,
+      };
 
       if (interaction.replied || interaction.deferred) {
         await interaction.followUp(errorMessage);

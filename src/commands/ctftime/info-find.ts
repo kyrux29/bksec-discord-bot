@@ -46,16 +46,18 @@ const command: Command = {
       const embed = createEmbed(result);
       await interaction.editReply({ embeds: [embed] });
 
-      logger.info(
-        `User ${interaction.user.tag} searched for CTF: ${searchKey} (ID: ${ctftimeId})`
-      );
+      logger.info(`User ${interaction.user.tag} searched for CTF: ${searchKey} (ID: ${ctftimeId})`);
     } catch (error) {
       logger.error('Error in ct-info_find command:', error);
 
       if (interaction.deferred || interaction.replied) {
-        const embed = error instanceof CTFTimeAPIError
-          ? warningEmbed('CTFtime is unreachable', `The bot is fine — CTFtime.org appears to be down.\n\`${error.message}\`\nPlease try again later.`)
-          : errorEmbed('An error occurred');
+        const embed =
+          error instanceof CTFTimeAPIError
+            ? warningEmbed(
+                'CTFtime is unreachable',
+                `The bot is fine — CTFtime.org appears to be down.\n\`${error.message}\`\nPlease try again later.`
+              )
+            : errorEmbed('An error occurred');
         await interaction.editReply({ embeds: [embed] });
       }
     }

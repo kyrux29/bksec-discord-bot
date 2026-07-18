@@ -1,12 +1,10 @@
 import { ChannelType, Message } from 'discord.js';
 import databaseService from '../services/database.service';
 import challengeService from '../services/challenge.service';
-import { ChallengeCategory } from '../types';
+import { CHALLENGE_CATEGORIES, ChallengeCategory } from '../types';
 import logger from '../utils/logger';
 
-const challengeCategories = new Set<ChallengeCategory>([
-  'web', 'pwn', 'crypto', 'rev', 'forensics', 'misc',
-]);
+const challengeCategories = new Set<ChallengeCategory>(CHALLENGE_CATEGORIES);
 
 function cleanThreadName(name: string): string {
   return name
@@ -54,7 +52,10 @@ export async function handleChallengeMessage(message: Message): Promise<void> {
 
     await challengeService.renameThread(message.guild, result.challenge);
     await challengeService.refreshDashboard(message.guild, ctf.key, ctf.data);
-    await thread.send(`[PARTICIPANT ADDED] <@${message.author.id}> joined this challenge.`);
+    await thread.send({
+      content: `[PARTICIPANT ADDED] <@${message.author.id}> joined this challenge.`,
+      allowedMentions: { users: [message.author.id] },
+    });
   } catch (error) {
     logger.error('Failed to auto-claim challenge from first message:', error);
   }

@@ -22,6 +22,9 @@ export interface EnvConfig {
   GITHUB_TOKEN: string;
   GH_INVITE_REPO_OWNER: string;
   GH_INVITE_REPO_NAME: string;
+  VERIFY_REMOVE_ROLE_ID?: string;
+  VERIFY_GRANT_ROLE_ID?: string;
+  VERIFY_ALLOWED_ROLE_ID?: string;
 }
 
 // CTF Database types
@@ -40,7 +43,9 @@ export interface CTFData {
   competitionEndtime?: number;
 }
 
-export type ChallengeCategory = 'web' | 'pwn' | 'crypto' | 'rev' | 'forensics' | 'misc';
+export const CHALLENGE_CATEGORIES = ['web', 'pwn', 'crypto', 'rev', 'forensics', 'misc'] as const;
+
+export type ChallengeCategory = (typeof CHALLENGE_CATEGORIES)[number];
 export type ChallengeStatus = 'unclaimed' | 'working' | 'idea' | 'solved';
 
 export interface CTFChallenge {
@@ -134,13 +139,16 @@ export interface CTFTimeEvent {
   restrictions: string;
 }
 
-export interface CTFTimeEventsResponse extends Array<CTFTimeEvent> {}
+export type CTFTimeEventsResponse = CTFTimeEvent[];
 
 // CTF Service return types
 export interface CTFInfo {
   title: string;
   startTime: number;
+  /** Actual competition end time. */
   endTime: number;
+  /** Time at which the Discord category may be archived. */
+  archiveAt: number;
   embedData: CTFEmbedData;
 }
 

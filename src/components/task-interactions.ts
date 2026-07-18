@@ -22,7 +22,9 @@ import {
 } from '../utils/task.constants';
 import logger from '../utils/logger';
 
-export async function handleTaskModalInteraction(interaction: ModalSubmitInteraction): Promise<boolean> {
+export async function handleTaskModalInteraction(
+  interaction: ModalSubmitInteraction
+): Promise<boolean> {
   if (interaction.customId.startsWith(`${taskCustomIds.issueModal}:`)) {
     await handleIssueTaskModal(interaction);
     return true;
@@ -36,7 +38,9 @@ export async function handleTaskModalInteraction(interaction: ModalSubmitInterac
   return false;
 }
 
-export async function handleTaskSelectInteraction(interaction: StringSelectMenuInteraction): Promise<boolean> {
+export async function handleTaskSelectInteraction(
+  interaction: StringSelectMenuInteraction
+): Promise<boolean> {
   if (interaction.customId === taskCustomIds.submitSelect) {
     await handleSubmitSelect(interaction);
     return true;
@@ -52,7 +56,10 @@ export async function handleTaskSelectInteraction(interaction: StringSelectMenuI
 
 async function handleIssueTaskModal(interaction: ModalSubmitInteraction): Promise<void> {
   if (!interaction.guild || !interaction.channel || !interaction.channel.isTextBased()) {
-    await interaction.reply({ embeds: [errorEmbed('This command must be used in a text channel')], ephemeral: true });
+    await interaction.reply({
+      embeds: [errorEmbed('This command must be used in a text channel')],
+      ephemeral: true,
+    });
     return;
   }
 
@@ -131,7 +138,10 @@ async function handleSubmitSelect(interaction: StringSelectMenuInteraction): Pro
 
 async function handleSubmitModal(interaction: ModalSubmitInteraction): Promise<void> {
   if (!interaction.guild || !interaction.channel || !interaction.channel.isTextBased()) {
-    await interaction.reply({ embeds: [errorEmbed('This command must be used in a text channel')], ephemeral: true });
+    await interaction.reply({
+      embeds: [errorEmbed('This command must be used in a text channel')],
+      ephemeral: true,
+    });
     return;
   }
 
@@ -154,9 +164,12 @@ async function handleSubmitModal(interaction: ModalSubmitInteraction): Promise<v
       content,
     });
 
-    await (interaction.channel as TextChannel).send(`${interaction.user} has submitted for task **${task.name}**.`);
+    await (interaction.channel as TextChannel).send(
+      `${interaction.user} has submitted for task **${task.name}**.`
+    );
 
-    const adminChannel = interaction.guild.channels.cache.get(config.TASK_ADMIN_CHANNEL_ID) as TextChannel | undefined;
+    const adminChannel = interaction.guild.channels.cache.get(config.TASK_ADMIN_CHANNEL_ID) as
+      TextChannel | undefined;
     if (adminChannel) {
       const embed = new EmbedBuilder()
         .setTitle(`Submission: ${task.name}`)
@@ -193,10 +206,15 @@ async function handleShowAllSelect(interaction: StringSelectMenuInteraction): Pr
   }
 
   const member = interaction.member as GuildMember;
-  const isAdmin = member.roles.cache.has(config.ADMIN_ROLE_ID) || member.permissions.has(PermissionFlagsBits.Administrator);
+  const isAdmin =
+    member.roles.cache.has(config.ADMIN_ROLE_ID) ||
+    member.permissions.has(PermissionFlagsBits.Administrator);
 
   if (!task.revealed && !isAdmin) {
-    await interaction.update({ content: 'Submissions for this task are not revealed yet.', components: [] });
+    await interaction.update({
+      content: 'Submissions for this task are not revealed yet.',
+      components: [],
+    });
     return;
   }
 

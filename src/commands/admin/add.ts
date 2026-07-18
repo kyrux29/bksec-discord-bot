@@ -1,4 +1,4 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction, TextChannel, CategoryChannel } from 'discord.js';
+import { ChannelType, ChatInputCommandInteraction, SlashCommandBuilder } from 'discord.js';
 import { Command } from '../../types';
 import databaseService from '../../services/database.service';
 import discordService from '../../services/discord.service';
@@ -7,124 +7,106 @@ import logger from '../../utils/logger';
 import { config } from '../../config/env';
 import { requireAdmin } from '../../utils/role.guard';
 
+async function currentCategoryId(interaction: ChatInputCommandInteraction): Promise<string | null> {
+  const channel = interaction.channel;
+  if (!channel || !interaction.guild) return null;
+  if (channel.isThread()) {
+    if (!channel.parentId) return null;
+    const parent = await interaction.guild.channels.fetch(channel.parentId).catch(() => null);
+    return parent && 'parentId' in parent ? parent.parentId : null;
+  }
+  return 'parentId' in channel ? channel.parentId : null;
+}
+
 const command: Command = {
   data: new SlashCommandBuilder()
     .setName('admin-add')
-    .setDescription('Thêm vào List một giải CTF cũ')
+    .setDescription('Thêm một Discord category có sẵn vào danh sách CTF')
     .addStringOption((option) =>
       option
         .setName('cate_id')
-        .setDescription(
-          'Nhập Discord Category ID của giải CTF trong server [Hoặc chỉ cần chạy trong channel thuộc CTF đó]'
-        )
+        .setDescription('Discord Category ID; tự nhận diện nếu bỏ trống')
+        .setMaxLength(20)
         .setRequired(false)
     ) as SlashCommandBuilder,
 
   async execute(interaction: ChatInputCommandInteraction) {
     try {
       if (!(await requireAdmin(interaction))) return;
+      if (!interaction.guild) return;
 
-      if (!interaction.guild || !interaction.channel) {
-        await interaction.reply({ embeds: [errorEmbed('This command must be used in a server')], ephemeral: true });
+      await interaction.deferReply({ ephemeral: true });
+      const categoryId =
+        interaction.options.getString('cate_id') || (await currentCategoryId(interaction));
+      if (!categoryId || !/^\d{17,20}$/.test(categoryId)) {
+        await interaction.editReply({ embeds: [errorEmbed('Category ID không hợp lệ.')] });
         return;
       }
 
-      await interaction.deferReply();
-
-      let cateId = interaction.options.get('cate_id')?.value as string | undefined;
-
-      // Get category ID from current channel if not provided
-      if (!cateId || cateId === '0') {
-        const channel = interaction.channel as TextChannel;
-        if (!channel.parent) {
-          await interaction.editReply({ embeds: [errorEmbed('This channel is not in a category')] });
-          return;
-        }
-        cateId = channel.parent.id;
-      }
-
-      // Validate category ID
-      if (!/^\d+$/.test(cateId)) {
-        await interaction.editReply({ embeds: [errorEmbed('Invalid category ID')] });
-        return;
-      }
-
-      // Check if already exists in database
-      const existing = await databaseService.findByCategoryId(cateId);
-
+      const existing = await databaseService.findByCategoryId(categoryId);
       if (existing) {
         await interaction.editReply({
-          embeds: [warningEmbed('Oops...', 'CTF này đã có trong list.')],
+          embeds: [warningEmbed('CTF đã tồn tại', 'Category này đã có trong database.')],
         });
         return;
       }
 
-      // Get category
-      const category = interaction.guild.channels.cache.get(cateId) as CategoryChannel;
+      const channel = await interaction.guild.channels.fetch(categoryId).catch(() => null);
+      if (channel?.type !== ChannelType.GuildCategory) {
+        await interaction.editReply({ embeds: [errorEmbed('Không tìm thấy Discord category.')] });
+        return;
+      }
 
-      if (!category) {
-        await interaction.editReply({ embeds: [errorEmbed('Category not found')] });
+      const originalName = channel.name;
+      const categoryName = originalName.replace(/^\[UNLISTED\]\s*/, '').trim();
+      const role = await discordService.relistCTFCategory(
+        interaction.guild,
+        categoryId,
+        categoryName
+      );
+      if (!role) {
+        await interaction.editReply({ embeds: [errorEmbed('Không thể tạo role cho CTF.')] });
         return;
       }
 
       try {
-        // Remove [UNLISTED] prefix if present
-        let categoryName = category.name;
-        if (categoryName.startsWith('[UNLISTED]')) {
-          categoryName = categoryName.replace('[UNLISTED]', '').trim();
-          await category.setName(categoryName);
-        }
-
-        // Create role and set permissions
-        const role = await discordService.relistCTFCategory(
-          interaction.guild,
-          cateId,
-          categoryName
-        );
-
-        if (!role) {
-          await interaction.editReply({ embeds: [errorEmbed('Failed to create role')] });
-          return;
-        }
-
-        // Add to database
         await databaseService.addCTF({
           ctftimeid: 0,
           role: role.id,
-          cate: cateId,
+          cate: categoryId,
           name: categoryName,
           infom: '0',
           channel: '0',
           endtime: 0,
+          starttime: 0,
+          competitionEndtime: 0,
         });
-
-        await interaction.editReply({
-          embeds: [successEmbed(`<***${categoryName}***> đã thêm vào list`)],
-        });
-
-        // Log to log channel
-        if (config.LOG_CHANNELID) {
-          const logChannel = interaction.guild.channels.cache.get(config.LOG_CHANNELID) as TextChannel;
-          if (logChannel) {
-            await logChannel.send(
-              `${interaction.user.username} has manually listed <***${categoryName}***>`
-            );
-          }
-        }
-
-        logger.info(`User ${interaction.user.tag} added CTF to list: ${categoryName}`);
       } catch (error) {
-        logger.error('Error during category re-listing:', error);
+        await role.delete('Rolling back failed admin-add').catch(() => undefined);
+        await discordService.unlistCTFCategory(interaction.guild, categoryId);
+        await channel.setName(originalName).catch(() => undefined);
+        throw error;
+      }
 
-        if (interaction.deferred || interaction.replied) {
-          await interaction.editReply({ embeds: [errorEmbed('An error occurred')] });
+      await interaction.editReply({
+        embeds: [successEmbed(`<***${categoryName}***> đã được thêm vào danh sách.`)],
+      });
+
+      if (config.LOG_CHANNELID) {
+        const logChannel = interaction.guild.channels.cache.get(config.LOG_CHANNELID);
+        if (logChannel?.isTextBased()) {
+          await logChannel
+            .send(`${interaction.user.username} manually listed <***${categoryName}***>`)
+            .catch((error) => logger.warn('Could not write admin-add audit log:', error));
         }
       }
     } catch (error) {
       logger.error('Error in admin-add command:', error);
-
+      const payload = { embeds: [errorEmbed('Không thể thêm CTF vào database.')] };
       if (interaction.deferred || interaction.replied) {
-        await interaction.editReply({ embeds: [errorEmbed('An error occurred')] });
+        await interaction.editReply(payload).catch(() => undefined);
+      } else {
+        await interaction.reply({ ...payload, ephemeral: true }).catch(() => undefined);
       }
     }
   },

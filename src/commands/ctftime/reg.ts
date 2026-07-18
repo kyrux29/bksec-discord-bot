@@ -1,5 +1,5 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction, TextChannel } from 'discord.js';
-import { Command, CTFInfo } from '../../types';
+import { ChatInputCommandInteraction, SlashCommandBuilder, TextChannel } from 'discord.js';
+import { Command } from '../../types';
 import ctftimeService from '../../services/ctftime.service';
 import databaseService from '../../services/database.service';
 import discordService from '../../services/discord.service';
@@ -7,6 +7,47 @@ import { createEmbed, errorEmbed, successEmbed, warningEmbed } from '../../utils
 import logger from '../../utils/logger';
 import { config } from '../../config/env';
 import challengeService from '../../services/challenge.service';
+import { requireAdmin } from '../../utils/role.guard';
+
+interface ArchiveSummary {
+  archived: number;
+  failed: number;
+}
+
+async function archiveExpiredCTFs(
+  interaction: ChatInputCommandInteraction
+): Promise<ArchiveSummary> {
+  if (!interaction.guild) return { archived: 0, failed: 0 };
+
+  const expiredCTFs = await databaseService.getExpiredCTFs(Math.floor(Date.now() / 1000));
+  let archived = 0;
+  let failed = 0;
+
+  for (const ctf of expiredCTFs) {
+    const discordArchived = await discordService.archiveCTFRecord(
+      interaction.guild,
+      ctf.key,
+      ctf.data
+    );
+    if (!discordArchived) {
+      failed++;
+      continue;
+    }
+
+    archived++;
+  }
+
+  if ((archived > 0 || failed > 0) && config.LOG_CHANNELID) {
+    const logChannel = interaction.guild.channels.cache.get(config.LOG_CHANNELID);
+    if (logChannel?.isTextBased()) {
+      await logChannel
+        .send(`ct-reg auto-archive: archived=${archived}, failed=${failed}`)
+        .catch((error) => logger.warn('Could not write ct-reg archive log:', error));
+    }
+  }
+
+  return { archived, failed };
+}
 
 const command: Command = {
   data: new SlashCommandBuilder()
@@ -16,23 +57,23 @@ const command: Command = {
       option
         .setName('ctftime-id')
         .setDescription('ID giải CTF trên CTFtime')
+        .setMinValue(1)
         .setRequired(true)
     ) as SlashCommandBuilder,
 
   async execute(interaction: ChatInputCommandInteraction) {
+    let createdCategoryId: string | undefined;
+    let createdRoleId: string | undefined;
+    let databaseId: number | undefined;
+
     try {
-      if (!interaction.guild) {
-        await interaction.reply({ embeds: [errorEmbed('This command must be used in a server')], ephemeral: true });
-        return;
-      }
+      if (!(await requireAdmin(interaction))) return;
+      if (!interaction.guild) return;
 
       await interaction.deferReply();
+      const ctftimeId = interaction.options.getInteger('ctftime-id', true);
 
-      const ctftimeId = interaction.options.get('ctftime-id')?.value as number;
-
-      // Check if CTF is already registered
       const existing = await databaseService.findByCTFTimeId(ctftimeId);
-
       if (existing) {
         await interaction.editReply({
           embeds: [warningEmbed('Oops...', 'CTF này đã được tạo.')],
@@ -40,142 +81,120 @@ const command: Command = {
         return;
       }
 
-      // Get CTF info from CTFtime
       const result = await ctftimeService.getCTF(ctftimeId, true);
-
-      if (!result || !('title' in result)) {
+      if (!result || !('archiveAt' in result)) {
         await interaction.editReply({ embeds: [errorEmbed('Failed to fetch CTF info')] });
         return;
       }
+      const ctfInfo = result;
 
-      const ctfInfo = result as CTFInfo;
-
-      // Create category, role, and channels
-      const created = await discordService.createCTFCategory(
-        interaction.guild,
-        ctfInfo.title
-      );
-
+      const created = await discordService.createCTFCategory(interaction.guild, ctfInfo.title);
       if (!created) {
         await interaction.editReply({ embeds: [errorEmbed('Failed to create CTF category')] });
         return;
       }
 
       const { category, role, infoChannel } = created;
+      createdCategoryId = category.id;
+      createdRoleId = role.id;
 
-      // Send info embed to info channel
       try {
-        const embed = createEmbed(ctfInfo.embedData);
-        const message = await infoChannel.send({ embeds: [embed] });
-        await message.pin();
+        const infoMessage = await infoChannel.send({
+          embeds: [createEmbed(ctfInfo.embedData)],
+        });
+        await infoMessage.pin().catch((error) => {
+          logger.warn(`Could not pin info message for ${ctfInfo.title}:`, error);
+        });
 
-        // Add CTF to database
-        const databaseId = await databaseService.addCTF({
+        databaseId = await databaseService.addCTF({
           ctftimeid: ctftimeId,
           role: role.id,
           cate: category.id,
           name: ctfInfo.title,
-          infom: message.id,
+          infom: infoMessage.id,
           channel: infoChannel.id,
-          endtime: ctfInfo.endTime,
+          endtime: ctfInfo.archiveAt,
           starttime: ctfInfo.startTime,
-          competitionEndtime: ctfInfo.endTime - 604800,
+          competitionEndtime: ctfInfo.endTime,
         });
-
-        const registeredCTF = await databaseService.findByKey(databaseId.toString());
-        if (registeredCTF) {
-          await challengeService.refreshDashboard(
-            interaction.guild,
-            registeredCTF.key,
-            registeredCTF.data
-          );
-        }
-
-        // Revert any CTFs whose time has run out
-        await discordService.syncEndedCTFs(interaction.guild);
-
-        await interaction.editReply({
-          embeds: [successEmbed(`Đã tạo channel cho <***${ctfInfo.title}***>`)],
-        });
-
-        // Log to log channel
-        if (config.LOG_CHANNELID) {
-          const logChannel = interaction.guild.channels.cache.get(config.LOG_CHANNELID) as TextChannel;
-          if (logChannel) {
-            await logChannel.send(`${interaction.user.username} has created <***${ctfInfo.title}***>`);
-          }
-        }
-
-        // Create Discord scheduled event
-        try {
-          const startTime = new Date(ctfInfo.startTime * 1000);
-          const endTime = new Date((ctfInfo.endTime - 604800) * 1000); // Remove the 1 week buffer for event
-
-          await discordService.createCTFEvent(
-            interaction.guild,
-            ctfInfo.title,
-            startTime,
-            endTime
-          );
-
-          if (config.LOG_CHANNELID) {
-            const logChannel = interaction.guild.channels.cache.get(config.LOG_CHANNELID) as TextChannel;
-            if (logChannel) {
-              await logChannel.send(`Event '${ctfInfo.title}' created successfully!`);
-            }
-          }
-        } catch (eventError) {
-          logger.error('Error creating scheduled event:', eventError);
-          if (config.LOG_CHANNELID) {
-            const logChannel = interaction.guild.channels.cache.get(config.LOG_CHANNELID) as TextChannel;
-            if (logChannel) {
-              await logChannel.send(`Failed to create event for '${ctfInfo.title}'`);
-            }
-          }
-        }
-
-        // Auto-hide old CTFs
-        await autoHideOldCTFs(interaction);
-
-        logger.info(`User ${interaction.user.tag} registered CTF: ${ctfInfo.title} (ID: ${ctftimeId})`);
       } catch (error) {
-        logger.error('Error during CTF registration:', error);
+        logger.error(`Core registration failed for ${ctfInfo.title}:`, error);
+        await discordService.rollbackCTFCreation(
+          interaction.guild,
+          createdCategoryId,
+          createdRoleId
+        );
         await interaction.editReply({
-          embeds: [errorEmbed('Error: Please make sure I have view permission.')],
+          embeds: [
+            errorEmbed('Registration failed and partial Discord resources were rolled back.'),
+          ],
         });
+        return;
       }
+
+      const registeredCTF = await databaseService.findByKey(String(databaseId));
+      if (registeredCTF) {
+        await challengeService
+          .refreshDashboard(interaction.guild, registeredCTF.key, registeredCTF.data)
+          .catch((error) => logger.warn(`Initial dashboard failed for ${ctfInfo.title}:`, error));
+      }
+
+      await discordService
+        .syncEndedCTFs(interaction.guild)
+        .catch((error) => logger.warn('Could not synchronize ended CTF permissions:', error));
+
+      const eventCreated = await discordService.createCTFEvent(
+        interaction.guild,
+        ctfInfo.title,
+        new Date(ctfInfo.startTime * 1000),
+        new Date(ctfInfo.endTime * 1000)
+      );
+      if (!eventCreated) logger.warn(`Scheduled event creation failed for ${ctfInfo.title}`);
+
+      const archiveSummary = await archiveExpiredCTFs(interaction);
+      await interaction.editReply({
+        embeds: [
+          successEmbed(
+            `Đã tạo channel cho <***${ctfInfo.title}***>` +
+              (archiveSummary.failed ? `\nAuto-archive failed: ${archiveSummary.failed}` : '')
+          ),
+        ],
+      });
+
+      if (config.LOG_CHANNELID) {
+        const logChannel = interaction.guild.channels.cache.get(config.LOG_CHANNELID) as
+          TextChannel | undefined;
+        if (logChannel?.isTextBased()) {
+          await logChannel
+            .send(
+              `${interaction.user.username} created <***${ctfInfo.title}***> (CTFtime ${ctftimeId})`
+            )
+            .catch((error) => logger.warn('Could not write ct-reg audit log:', error));
+        }
+      }
+
+      logger.info(
+        `User ${interaction.user.tag} registered CTF: ${ctfInfo.title} (ID: ${ctftimeId})`
+      );
     } catch (error) {
       logger.error('Error in ct-reg command:', error);
 
+      if (databaseId === undefined && interaction.guild && (createdCategoryId || createdRoleId)) {
+        await discordService.rollbackCTFCreation(
+          interaction.guild,
+          createdCategoryId,
+          createdRoleId
+        );
+      }
+
+      const payload = { embeds: [errorEmbed('An error occurred while registering the CTF')] };
       if (interaction.deferred || interaction.replied) {
-        await interaction.editReply({ embeds: [errorEmbed('An error occurred')] });
+        await interaction.editReply(payload).catch(() => undefined);
+      } else {
+        await interaction.reply({ ...payload, ephemeral: true }).catch(() => undefined);
       }
     }
   },
 };
-
-/**
- * Auto-hide expired CTFs
- */
-async function autoHideOldCTFs(interaction: ChatInputCommandInteraction): Promise<void> {
-  if (!interaction.guild) return;
-
-  const currentTime = Math.floor(Date.now() / 1000);
-  const expiredCTFs = await databaseService.getExpiredCTFs(currentTime);
-
-  if (expiredCTFs.length > 0) {
-    for (const ctf of expiredCTFs) {
-      await discordService.archiveCTFCategory(interaction.guild, ctf.data.cate, ctf.data.channel);
-      await databaseService.updateCTF(ctf.key, { archived: true });
-    }
-
-    if (config.LOG_CHANNELID) {
-      const logChannel = interaction.guild.channels.cache.get(config.LOG_CHANNELID) as TextChannel;
-      if (logChannel) {
-        await logChannel.send('`reg` - Auto hiding some CTFs');
-      }
-    }
-  }
-}
 
 export default command;

@@ -86,12 +86,24 @@ export async function runTests(): Promise<void> {
       content: 'updated solution',
     });
 
-    expectEqual(secondSubmission.id, firstSubmission.id, 'upsert should update the same submission row');
-    expectEqual(secondSubmission.content, 'updated solution', 'upsert should return latest content');
+    expectEqual(
+      secondSubmission.id,
+      firstSubmission.id,
+      'upsert should update the same submission row'
+    );
+    expectEqual(
+      secondSubmission.content,
+      'updated solution',
+      'upsert should return latest content'
+    );
 
     const submissions = await databaseService.getTaskSubmissions(task.id);
     expectEqual(submissions.length, 1, 'task should have one latest submission');
-    expectEqual(submissions[0]?.content, 'updated solution', 'latest submission content should be returned');
+    expectEqual(
+      submissions[0]?.content,
+      'updated solution',
+      'latest submission content should be returned'
+    );
 
     const history = await databaseService.getTaskSubmissionHistory(firstSubmission.id);
     expectEqual(history.length, 1, 'submission history should include the old content');

@@ -1,15 +1,24 @@
 {
   "name": "hweplir-discordjs",
   "version": "2.0.0",
+  "private": true,
   "description": "CTF Discord Bot - Rewritten in discord.js with TypeScript",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kyrux29/bksec-discord-bot.git"
+  },
   "main": "dist/index.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
     "test": "tsx src/tests/run-tests.ts",
-    "lint": "eslint src --ext .ts",
-    "format": "prettier --write \"src/**/*.ts\""
+    "test:smoke": "tsx src/tests/ctftime.test.ts",
+    "audit": "bun audit",
+    "lint": "eslint src --ext .ts --max-warnings=0",
+    "format": "prettier --write \"src/**/*.ts\" \"*.json\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"*.json\"",
+    "check": "bun run format:check && bun run lint && bun run build && bun run test"
   },
   "keywords": [
     "discord",
@@ -18,25 +27,36 @@
     "ctftime",
     "typescript"
   ],
-  "author": "",
+  "author": "BKSEC contributors",
   "license": "MIT",
   "dependencies": {
-    "axios": "^1.7.9",
-    "better-sqlite3": "^12.5.0",
-    "date-fns": "^4.1.0",
-    "discord.js": "^14.16.3",
-    "dotenv": "^16.4.5",
-    "winston": "^3.15.0"
+    "axios": "^1.18.1",
+    "better-sqlite3": "^12.11.1",
+    "date-fns": "^4.4.0",
+    "discord.js": "^14.27.0",
+    "dotenv": "^16.6.1",
+    "winston": "^3.19.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
-    "@types/node": "^22.10.2",
-    "@typescript-eslint/eslint-plugin": "^8.18.1",
-    "@typescript-eslint/parser": "^8.18.1",
+    "@types/node": "^22.20.1",
+    "@typescript-eslint/eslint-plugin": "^8.64.0",
+    "@typescript-eslint/parser": "^8.64.0",
     "eslint": "^8.57.1",
-    "prettier": "^3.4.2",
-    "tsx": "^4.19.2",
-    "typescript": "^5.7.2"
+    "prettier": "^3.9.5",
+    "tsx": "^4.23.1",
+    "typescript": "^5.9.3"
+  },
+  "overrides": {
+    "ajv": "6.14.0",
+    "brace-expansion": "1.1.13",
+    "flatted": "3.4.2",
+    "form-data": "4.0.6",
+    "js-yaml": "4.3.0",
+    "lodash": "4.18.1",
+    "minimatch": "3.1.4",
+    "undici": "6.27.0",
+    "ws": "8.21.1"
   },
   "engines": {
     "node": ">=18.0.0"

@@ -18,7 +18,10 @@ const command: Command = {
   async execute(interaction: ChatInputCommandInteraction) {
     try {
       if (!interaction.guild) {
-        await interaction.reply({ embeds: [errorEmbed('This command must be used in a server')], ephemeral: true });
+        await interaction.reply({
+          embeds: [errorEmbed('This command must be used in a server')],
+          ephemeral: true,
+        });
         return;
       }
 
@@ -34,10 +37,12 @@ const command: Command = {
       const ctfEntry = await databaseService.findByRoleId(role.id);
       if (ctfEntry?.data.channelsPurged) {
         await interaction.editReply({
-          embeds: [warningEmbed(
-            'Channels Unavailable',
-            `Channels for **${ctfEntry.data.name}** have been cleaned up to free server space. The role is kept for record-keeping.`
-          )],
+          embeds: [
+            warningEmbed(
+              'Channels Unavailable',
+              `Channels for **${ctfEntry.data.name}** have been cleaned up to free server space. The role is kept for record-keeping.`
+            ),
+          ],
         });
         return;
       }

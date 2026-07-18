@@ -65,7 +65,8 @@ const command: Command = {
           },
           {
             name: '🔗 Links',
-            value: '[GitHub](https://github.com/teebow1e/Hweplir) • [Report Issue](https://github.com/teebow1e/Hweplir/issues)',
+            value:
+              '[GitHub](https://github.com/teebow1e/Hweplir) • [Report Issue](https://github.com/teebow1e/Hweplir/issues)',
             inline: false,
           }
         )

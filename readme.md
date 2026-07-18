@@ -9,11 +9,11 @@ Hweplir is a Discord bot for managing CTF participation in one server. It is wri
 - Creates a Discord category, CTF role, info channel, and challenge channels.
 - Stores CTF metadata, Discord IDs, archive time, and archive state in SQLite.
 - Lists registered CTFs and lets users show or hide CTF channels for themselves.
-- Updates login/account information in a CTF info message.
-- Archives old CTF categories by hiding them after their configured end time.
+- Lets administrators update shared login information; passwords use Discord spoilers and are removed automatically when the competition ends.
+- Opens archive-role access at competition end and archives CTFtime categories after a seven-day grace period.
 - Supports manually-created CTF categories that are not on CTFtime.
 - Provides admin utilities for deleting, importing, fixing, and permission-locking CTF categories.
-- Provides verification commands for server roles.
+- Can optionally provide a configurable server-role verification command.
 - Handles pagination and confirmation buttons for interactive commands.
 - Tracks challenge threads, claims, status, solves, points, writeups, and a pinned live dashboard.
 - Sends persisted CTF reminders and refreshes countdowns every five minutes.
@@ -31,6 +31,8 @@ Hweplir is a Discord bot for managing CTF participation in one server. It is wri
 | `/ct-reg` | Register a CTF from a CTFtime event ID. |
 | `/ct-regacc` | Update account credentials for a registered CTF. |
 
+`/ct-reg` and `/ct-regacc` require `ADMIN_ROLE_ID` or Discord Administrator permission.
+
 ### General commands
 
 | Command | Purpose |
@@ -38,8 +40,9 @@ Hweplir is a Discord bot for managing CTF participation in one server. It is wri
 | `/c-list` | List registered CTFs from the local database. |
 | `/c-view` | Toggle access to a registered CTF category by adding/removing its role. |
 | `/solve` | Mark the current challenge thread as solved and announce the solved roster. |
+| `/challenge` | Create, claim, release, and track challenge threads. |
+| `/writeup` | Claim and submit writeups for solved challenges. |
 | `/whoami` | Show bot information and runtime statistics. |
-| `/enroll-htba` | Enroll for access to BKSEC HTB Academy sharing. |
 
 ### Admin commands
 
@@ -50,8 +53,9 @@ Hweplir is a Discord bot for managing CTF participation in one server. It is wri
 | `/admin-delete` | Delete a CTF record and optionally its Discord objects. |
 | `/admin-add` | Add an existing Discord category to the CTF database. |
 | `/admin-deny-role` | Deny the configured deny role from viewing existing CTF categories. |
-| `/admin-fix` | Fix archived info-channel permissions. |
-| `/verifyg10` | Verify a user into G10 by changing roles. |
+| `/admin-fix` | Rebuild lifecycle permissions for all tracked CTF categories. |
+| `/admin-unsolve` | Undo an accidental challenge solve. |
+| `/verifyg10` | Optional role-verification command; registered only when its three role IDs are configured. |
 
 ## Runtime requirements
 
@@ -66,6 +70,8 @@ Required environment variables:
 SERVER_ID=discord_guild_id
 BOT_TOKEN=discord_bot_token
 VIEW_ALL_CTF_ROLEID=role_that_can_view_all_ctfs
+ACTIVE_CTF_ROLEID=role_for_current_ctf_players
+ADMIN_ROLE_ID=role_allowed_to_manage_ctfs
 ```
 
 Optional environment variables:
@@ -73,6 +79,9 @@ Optional environment variables:
 ```env
 LOG_CHANNELID=channel_for_bot_logs
 DENY_CTF_ROLEID=role_blocked_from_ctf_categories
+VERIFY_REMOVE_ROLE_ID=optional_guest_role
+VERIFY_GRANT_ROLE_ID=optional_member_role
+VERIFY_ALLOWED_ROLE_ID=optional_verifier_role
 VERIFIED_ROLE_ID=only_needed_when_htb_enrollment_is_re-enabled
 GITHUB_TOKEN=only_needed_when_github_invites_are_re-enabled
 GH_INVITE_REPO_OWNER=only_needed_when_github_invites_are_re-enabled
@@ -96,10 +105,12 @@ bun run dev
 Useful scripts:
 
 ```bash
-bun run build   # compile TypeScript to dist/
-bun test        # run the CTFtime service test
-bun run lint    # lint src/
-bun run format  # format src/**/*.ts
+bun run check       # formatting, lint, build, and deterministic tests
+bun run audit       # scan direct and transitive dependencies
+bun run test        # deterministic local tests (no network)
+bun run test:smoke  # optional live CTFtime API smoke test
+bun run lint        # lint src/ with zero warnings allowed
+bun run format      # format TypeScript and root JSON files
 ```
 
 ## Code structure
@@ -121,10 +132,14 @@ src/
 │   └── ready.ts              # Startup behavior and ready-state handling
 ├── services/
 │   ├── ctftime.service.ts    # CTFtime API access, event parsing, search, pagination embeds
-│   ├── database.service.ts   # SQLite schema and CTF CRUD operations
+│   ├── challenge.service.ts  # Dashboards, announcements, and thread naming
+│   ├── ctf-scheduler.service.ts # Lifecycle reminders and permission sweeps
+│   ├── database.service.ts   # SQLite schema and persistent state
 │   └── discord.service.ts    # Discord roles, channels, categories, events, permissions
 ├── tests/
-│   └── ctftime.test.ts       # Manual test script for CTFtime behavior
+│   ├── challenge-database.test.ts
+│   ├── ctf-schedule.test.ts
+│   └── ctftime.test.ts       # Optional live CTFtime smoke test
 ├── types/
 │   └── index.ts              # Shared TypeScript interfaces and enums
 └── utils/
@@ -136,9 +151,7 @@ src/
 Other important files:
 
 ```text
-scripts/migrate-to-sqlite.ts  # Migrates old JSON CTF data into ctf.db
 ctf.db                        # Local SQLite database used at runtime
-ctf.json                      # Legacy/source JSON data if present
 logs/                         # Runtime log files
 ```
 
@@ -154,10 +167,12 @@ logs/                         # Runtime log files
 
 ## Database model
 
-The SQLite database has two main tables:
+The SQLite database stores CTFs, challenge state, dashboards, reminders, solved records, and the currently-disabled club-task workflow.
 
 - `metadata`: stores small bot metadata, currently including the CTF counter.
-- `ctfs`: stores registered CTFs.
+- `ctfs`: stores registered CTFs and separate competition/archive times.
+- `ctf_challenges`, `solved_challenges`: challenge ownership and solve state.
+- `ctf_dashboards`, `ctf_reminders`: persistent dashboard and scheduler state.
 
 Each CTF row stores:
 

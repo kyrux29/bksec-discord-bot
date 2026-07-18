@@ -12,10 +12,7 @@ const command: Command = {
       option
         .setName('order')
         .setDescription('Thứ tự list')
-        .addChoices(
-          { name: 'Cũ nhất', value: 'Cũ nhất' },
-          { name: 'Mới nhất', value: 'Mới nhất' }
-        )
+        .addChoices({ name: 'Cũ nhất', value: 'Cũ nhất' }, { name: 'Mới nhất', value: 'Mới nhất' })
         .setRequired(false)
     )
     .addIntegerOption((option) =>
@@ -33,14 +30,17 @@ const command: Command = {
     try {
       await interaction.deferReply();
 
-      const order = (interaction.options.get('order')?.value as 'Mới nhất' | 'Cũ nhất') || 'Mới nhất';
+      const order =
+        (interaction.options.get('order')?.value as 'Mới nhất' | 'Cũ nhất') || 'Mới nhất';
       const page = (interaction.options.get('page')?.value as number) || 1;
       const step = (interaction.options.get('step')?.value as number) || 5;
 
       const result = await ctftimeService.getListCTF(order, page - 1, step);
 
       if (!result) {
-        await interaction.editReply({ embeds: [errorEmbed('No CTFs found or invalid parameters')] });
+        await interaction.editReply({
+          embeds: [errorEmbed('No CTFs found or invalid parameters')],
+        });
         return;
       }
 
@@ -52,7 +52,9 @@ const command: Command = {
 
       await interaction.editReply({ embeds: [embed], components: [view] });
 
-      logger.info(`User ${interaction.user.tag} viewed CTF list (order: ${order}, page ${page}, step ${step})`);
+      logger.info(
+        `User ${interaction.user.tag} viewed CTF list (order: ${order}, page ${page}, step ${step})`
+      );
     } catch (error) {
       logger.error('Error in c-list command:', error);
 

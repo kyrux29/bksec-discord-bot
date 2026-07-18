@@ -1,4 +1,4 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction, TextChannel } from 'discord.js';
+import { ChatInputCommandInteraction, SlashCommandBuilder } from 'discord.js';
 import { Command } from '../../types';
 import databaseService from '../../services/database.service';
 import discordService from '../../services/discord.service';
@@ -10,63 +10,81 @@ import { requireAdmin } from '../../utils/role.guard';
 const command: Command = {
   data: new SlashCommandBuilder()
     .setName('admin-fix')
-    .setDescription('Sửa quyền info channel cho các CTF đã archive (hotfix)'),
+    .setDescription('Đồng bộ lại quyền category/channel của toàn bộ CTF'),
 
   async execute(interaction: ChatInputCommandInteraction) {
     try {
       if (!(await requireAdmin(interaction))) return;
-
-      if (!interaction.guild) {
-        await interaction.reply({ content: 'This command must be used in a server', ephemeral: true });
-        return;
-      }
+      if (!interaction.guild) return;
 
       await interaction.deferReply({ ephemeral: true });
-
       const allCTFs = await databaseService.getAllCTFs();
+      const now = Math.floor(Date.now() / 1000);
       let fixedCount = 0;
       const errors: string[] = [];
 
       for (const ctf of allCTFs) {
-        if (!ctf.data.archived) continue;
-        if (!ctf.data.channel || ctf.data.channel === '0') continue;
-
-        const infoChannel = interaction.guild.channels.cache.get(ctf.data.channel) as TextChannel;
-        if (!infoChannel) continue;
+        if (!ctf.data.cate || ctf.data.cate === '0' || ctf.data.channelsPurged) continue;
 
         try {
-          await infoChannel.permissionOverwrites.create(interaction.guild.roles.everyone, {
-            ViewChannel: false,
-            SendMessages: false,
-          });
+          if (ctf.data.archived) {
+            if (!(await discordService.archiveRegisteredCTF(interaction.guild, ctf.data))) {
+              throw new Error('archive permission repair failed');
+            }
+          } else {
+            const competitionEnd = ctf.data.competitionEndtime || ctf.data.endtime;
+            if (competitionEnd > 0 && now >= competitionEnd) {
+              const redacted = await discordService.redactCTFCredentials(
+                interaction.guild,
+                ctf.data.channel,
+                ctf.data.infom
+              );
+              if (!redacted) throw new Error('credential redaction failed');
+              await discordService.applyEndedPermissions(
+                interaction.guild,
+                ctf.data.cate,
+                ctf.data.role
+              );
+              await databaseService.updateCTF(ctf.key, { postEndOpened: true });
+            } else {
+              await discordService.applyLivePermissions(
+                interaction.guild,
+                ctf.data.cate,
+                ctf.data.role
+              );
+              if (ctf.data.postEndOpened) {
+                await databaseService.updateCTF(ctf.key, { postEndOpened: false });
+              }
+            }
+          }
+
           fixedCount++;
-          logger.info(`Fixed info channel permissions for: ${ctf.data.name}`);
-        } catch (err) {
+        } catch (error) {
           errors.push(ctf.data.name);
-          logger.error(`Failed to fix info channel for ${ctf.data.name}:`, err);
+          logger.error(`Failed to repair permissions for ${ctf.data.name}:`, error);
         }
       }
 
-      const reverted = await discordService.syncEndedCTFs(interaction.guild);
-
-      const msg = `Fixed ${fixedCount} archived CTF info channel(s). Reverted ${reverted} ended CTF(s) to normal visibility.` +
-        (errors.length > 0 ? `\nFailed: ${errors.join(', ')}` : '');
-
-      await interaction.editReply({ embeds: [successEmbed(msg)] });
+      const message =
+        `Đã đồng bộ ${fixedCount} CTF.` +
+        (errors.length ? ` Không thể sửa: ${errors.join(', ')}.` : '');
+      await interaction.editReply({ embeds: [successEmbed(message)] });
 
       if (config.LOG_CHANNELID) {
-        const logChannel = interaction.guild.channels.cache.get(config.LOG_CHANNELID) as TextChannel;
-        if (logChannel) {
-          await logChannel.send(`\`admin-fix\` - ${msg} (by ${interaction.user.username})`);
+        const logChannel = interaction.guild.channels.cache.get(config.LOG_CHANNELID);
+        if (logChannel?.isTextBased()) {
+          await logChannel
+            .send(`admin-fix by ${interaction.user.username}: ${message}`)
+            .catch((error) => logger.warn('Could not write admin-fix audit log:', error));
         }
       }
-
-      logger.info(`User ${interaction.user.tag} ran admin-fix (${fixedCount} fixed)`);
     } catch (error) {
       logger.error('Error in admin-fix command:', error);
-
+      const payload = { embeds: [errorEmbed('Không thể đồng bộ quyền CTF.')] };
       if (interaction.deferred || interaction.replied) {
-        await interaction.editReply({ embeds: [errorEmbed('An error occurred')] });
+        await interaction.editReply(payload).catch(() => undefined);
+      } else {
+        await interaction.reply({ ...payload, ephemeral: true }).catch(() => undefined);
       }
     }
   },

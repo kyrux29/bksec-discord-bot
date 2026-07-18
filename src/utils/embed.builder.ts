@@ -12,8 +12,7 @@ const LIMITS = {
   maxFields: 25,
 } as const;
 
-const trunc = (s: string, max: number) =>
-  s.length > max ? s.slice(0, max - 1) + '…' : s;
+const trunc = (s: string, max: number) => (s.length > max ? s.slice(0, max - 1) + '…' : s);
 
 export function createEmbed(data: Partial<CTFEmbedData>): EmbedBuilder {
   const embed = new EmbedBuilder();
@@ -35,9 +34,10 @@ export function createEmbed(data: Partial<CTFEmbedData>): EmbedBuilder {
   }
 
   if (data.footer) {
-    const footer = typeof data.footer === 'string'
-      ? { text: trunc(data.footer, LIMITS.footerText) }
-      : { text: trunc(data.footer.text, LIMITS.footerText), iconURL: data.footer.iconURL };
+    const footer =
+      typeof data.footer === 'string'
+        ? { text: trunc(data.footer, LIMITS.footerText) }
+        : { text: trunc(data.footer.text, LIMITS.footerText), iconURL: data.footer.iconURL };
     embed.setFooter(footer);
   }
 
@@ -55,7 +55,11 @@ export function createEmbed(data: Partial<CTFEmbedData>): EmbedBuilder {
   return embed;
 }
 
-export function simpleEmbed(title: string, description: string, color: number = 0xfcba03): EmbedBuilder {
+export function simpleEmbed(
+  title: string,
+  description: string,
+  color: number = 0xfcba03
+): EmbedBuilder {
   return createEmbed({ title, description, color, fields: [] });
 }
 

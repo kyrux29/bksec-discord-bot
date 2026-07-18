@@ -12,11 +12,59 @@ import logger from '../utils/logger';
 import { config } from '../config/env';
 import databaseService from './database.service';
 import { isCtfLive } from '../utils/ctf-visibility';
+import { CTFData } from '../types';
 
 /**
  * Discord helper service for managing channels, roles, and permissions
  */
 class DiscordService {
+  private async syncCategoryChildren(
+    category: CategoryChannel,
+    perCtfRoleId?: string
+  ): Promise<void> {
+    for (const [, channel] of category.children.cache) {
+      await channel.lockPermissions();
+      if (channel.type !== ChannelType.GuildText || channel.name !== 'announcements') {
+        continue;
+      }
+
+      await channel.permissionOverwrites.edit(category.guild.roles.everyone, {
+        SendMessages: false,
+      });
+      for (const roleId of new Set(
+        [config.ACTIVE_CTF_ROLEID, config.VIEW_ALL_CTF_ROLEID, perCtfRoleId].filter(
+          (value): value is string => Boolean(value)
+        )
+      )) {
+        await channel.permissionOverwrites.edit(roleId, { SendMessages: false });
+      }
+      if (category.guild.members.me) {
+        await channel.permissionOverwrites.edit(category.guild.members.me, {
+          ViewChannel: true,
+          SendMessages: true,
+        });
+      }
+    }
+  }
+
+  async rollbackCTFCreation(guild: Guild, categoryId?: string, roleId?: string): Promise<void> {
+    if (categoryId) {
+      const categoryDeleted = await this.deleteCTFCategory(guild, categoryId);
+      if (!categoryDeleted) {
+        logger.error(`Rollback could not delete category ${categoryId}`);
+      }
+    }
+
+    if (roleId) {
+      const role = await guild.roles.fetch(roleId).catch(() => null);
+      if (role) {
+        await role.delete('Rolling back failed CTF registration').catch((error) => {
+          logger.error(`Rollback could not delete role ${roleId}:`, error);
+        });
+      }
+    }
+  }
+
   /**
    * Create CTF category with channels and role
    */
@@ -28,11 +76,15 @@ class DiscordService {
     role: Role;
     infoChannel: TextChannel;
   } | null> {
+    let role: Role | null = null;
+    let category: CategoryChannel | null = null;
+
     try {
-      const normalizedName = name.trim();
+      const normalizedName = name.trim().slice(0, 100);
+      if (!normalizedName) throw new Error('CTF name cannot be empty');
 
       // Create role
-      const role = await guild.roles.create({
+      role = await guild.roles.create({
         name: normalizedName.toLowerCase(),
         mentionable: false,
         position: 1,
@@ -41,7 +93,7 @@ class DiscordService {
       logger.info(`Created role: ${role.name}`);
 
       // Create category
-      const category = await guild.channels.create({
+      category = await guild.channels.create({
         name: normalizedName,
         type: ChannelType.GuildCategory,
       });
@@ -65,7 +117,16 @@ class DiscordService {
       logger.info(`Created info channel: ${infoChannel.name}`);
 
       // Create other challenge channels
-      const channelNames = ['announcements', 'general', 'web', 'crypto', 'pwn', 'rev', 'forensics'];
+      const channelNames = [
+        'announcements',
+        'general',
+        'web',
+        'crypto',
+        'pwn',
+        'rev',
+        'forensics',
+        'misc',
+      ];
 
       for (const channelName of channelNames) {
         await guild.channels.create({
@@ -75,10 +136,12 @@ class DiscordService {
         });
         logger.debug(`Created channel: ${channelName}`);
       }
+      await this.syncCategoryChildren(category, role.id);
 
       return { category, role, infoChannel };
     } catch (error) {
       logger.error('Error creating CTF category:', error);
+      await this.rollbackCTFCreation(guild, category?.id, role?.id);
       return null;
     }
   }
@@ -95,11 +158,15 @@ class DiscordService {
     infoChannel: TextChannel;
     generalChannel: TextChannel;
   } | null> {
+    let role: Role | null = null;
+    let category: CategoryChannel | null = null;
+
     try {
-      const normalizedName = name.trim();
+      const normalizedName = name.trim().slice(0, 80);
+      if (!normalizedName) throw new Error('CTF name cannot be empty');
 
       // Create role (with angle brackets for special CTFs)
-      const role = await guild.roles.create({
+      role = await guild.roles.create({
         name: `<${normalizedName}>`,
         mentionable: true,
         position: 1,
@@ -108,7 +175,7 @@ class DiscordService {
       logger.info(`Created special role: ${role.name}`);
 
       // Create category
-      const category = await guild.channels.create({
+      category = await guild.channels.create({
         name: normalizedName,
         type: ChannelType.GuildCategory,
       });
@@ -138,8 +205,8 @@ class DiscordService {
         parent: category.id,
       });
 
-      // Create challenge channels (fewer for manual CTFs)
-      const channelNames = ['web', 'crypto', 'pwn-rev'];
+      // Keep manual and CTFtime categories consistent so auto-registration works.
+      const channelNames = ['web', 'crypto', 'pwn', 'rev', 'forensics', 'misc'];
 
       for (const channelName of channelNames) {
         await guild.channels.create({
@@ -148,10 +215,12 @@ class DiscordService {
           parent: category.id,
         });
       }
+      await this.syncCategoryChildren(category, role.id);
 
       return { category, role, infoChannel, generalChannel };
     } catch (error) {
       logger.error('Error creating special CTF category:', error);
+      await this.rollbackCTFCreation(guild, category?.id, role?.id);
       return null;
     }
   }
@@ -159,7 +228,12 @@ class DiscordService {
   /**
    * Archive CTF category (hide from @everyone)
    */
-  async archiveCTFCategory(guild: Guild, categoryId: string, infoChannelId?: string): Promise<boolean> {
+  async archiveCTFCategory(
+    guild: Guild,
+    categoryId: string,
+    infoChannelId?: string,
+    perCtfRoleId?: string
+  ): Promise<boolean> {
     try {
       const category = await guild.channels.fetch(categoryId).catch(() => null);
 
@@ -172,26 +246,39 @@ class DiscordService {
         return false;
       }
 
-      await category.permissionOverwrites.create(guild.roles.everyone, {
+      await category.permissionOverwrites.edit(guild.roles.everyone, {
         ViewChannel: false,
       });
-
-      // Also fix info channel permissions so it doesn't remain visible
-      if (infoChannelId) {
-        const infoChannel = guild.channels.cache.get(infoChannelId) as TextChannel;
-        if (infoChannel) {
-          await infoChannel.permissionOverwrites.create(guild.roles.everyone, {
-            ViewChannel: false,
-            SendMessages: false,
-          });
-          logger.info(`Locked info channel permissions: ${infoChannel.name}`);
-        }
+      if (config.DENY_CTF_ROLEID) {
+        await category.permissionOverwrites.edit(config.DENY_CTF_ROLEID, {
+          ViewChannel: false,
+        });
       }
+      await this.syncCategoryChildren(category, perCtfRoleId);
+
+      if (infoChannelId) logger.debug(`Archived info channel ${infoChannelId} with its category`);
 
       logger.info(`Archived category: ${category.name}`);
       return true;
     } catch (error) {
       logger.error('Error archiving category:', error);
+      return false;
+    }
+  }
+
+  async archiveRegisteredCTF(guild: Guild, ctf: CTFData): Promise<boolean> {
+    const credentialsRedacted = await this.redactCTFCredentials(guild, ctf.channel, ctf.infom);
+    if (!credentialsRedacted) return false;
+    return this.archiveCTFCategory(guild, ctf.cate, ctf.channel, ctf.role);
+  }
+
+  async archiveCTFRecord(guild: Guild, key: string, ctf: CTFData): Promise<boolean> {
+    if (!(await this.archiveRegisteredCTF(guild, ctf))) return false;
+    try {
+      await databaseService.updateCTF(key, { archived: true });
+      return true;
+    } catch (error) {
+      logger.error(`Discord archived ${ctf.name}, but the DB update failed:`, error);
       return false;
     }
   }
@@ -230,23 +317,28 @@ class DiscordService {
   }
 
   /**
-   * Unlist CTF category (make it visible but rename with [UNLISTED] prefix)
+   * Unlink a CTF category while keeping it private to CTF archive roles.
    */
   async unlistCTFCategory(guild: Guild, categoryId: string): Promise<boolean> {
     try {
-      const category = guild.channels.cache.get(categoryId) as CategoryChannel;
+      const channel = await guild.channels.fetch(categoryId).catch(() => null);
 
-      if (!category) {
+      if (!channel || channel.type !== ChannelType.GuildCategory) {
         logger.warn(`Category not found: ${categoryId}`);
         return false;
       }
+      const category = channel;
 
       if (!category.name.startsWith('[UNLISTED]')) {
-        await category.setName(`[UNLISTED] ${category.name}`);
+        await category.setName(`[UNLISTED] ${category.name}`.slice(0, 100));
       }
-      await category.permissionOverwrites.create(guild.roles.everyone, {
-        ViewChannel: true,
-      });
+      await category.permissionOverwrites.edit(guild.roles.everyone, { ViewChannel: false });
+      await category.permissionOverwrites.edit(config.ACTIVE_CTF_ROLEID, { ViewChannel: true });
+      await category.permissionOverwrites.edit(config.VIEW_ALL_CTF_ROLEID, { ViewChannel: true });
+      if (config.DENY_CTF_ROLEID) {
+        await category.permissionOverwrites.edit(config.DENY_CTF_ROLEID, { ViewChannel: false });
+      }
+      await this.syncCategoryChildren(category);
 
       logger.info(`Unlisted category: ${category.name}`);
       return true;
@@ -259,14 +351,21 @@ class DiscordService {
   /**
    * Re-list an unlisted category
    */
-  async relistCTFCategory(guild: Guild, categoryId: string, _roleName: string): Promise<Role | null> {
+  async relistCTFCategory(
+    guild: Guild,
+    categoryId: string,
+    _roleName: string
+  ): Promise<Role | null> {
+    let role: Role | null = null;
+    let originalName: string | undefined;
     try {
-      const category = guild.channels.cache.get(categoryId) as CategoryChannel;
-
-      if (!category) {
+      const channel = await guild.channels.fetch(categoryId).catch(() => null);
+      if (channel?.type !== ChannelType.GuildCategory) {
         logger.warn(`Category not found: ${categoryId}`);
         return null;
       }
+      const category = channel;
+      originalName = category.name;
 
       // Remove [UNLISTED] prefix if present
       let newName = category.name;
@@ -276,7 +375,7 @@ class DiscordService {
       }
 
       // Create role
-      const role = await guild.roles.create({
+      role = await guild.roles.create({
         name: `<${newName}>`,
         position: 1,
       });
@@ -299,15 +398,19 @@ class DiscordService {
         ViewChannel: false,
       });
 
-      // Sync permissions for all channels in category
-      for (const [, channel] of category.children.cache) {
-        await channel.lockPermissions();
-      }
+      await this.syncCategoryChildren(category, role.id);
 
       logger.info(`Re-listed category: ${category.name}`);
       return role;
     } catch (error) {
       logger.error('Error re-listing category:', error);
+      if (role) await role.delete('Rolling back failed CTF relist').catch(() => undefined);
+      if (originalName) {
+        const category = await guild.channels.fetch(categoryId).catch(() => null);
+        if (category?.type === ChannelType.GuildCategory && category.name !== originalName) {
+          await category.setName(originalName).catch(() => undefined);
+        }
+      }
       return null;
     }
   }
@@ -321,11 +424,11 @@ class DiscordService {
     categoryId: string,
     perCtfRoleId: string
   ): Promise<void> {
-    const category = guild.channels.cache.get(categoryId) as CategoryChannel | undefined;
-    if (!category) {
-      logger.warn(`applyLivePermissions: category not found: ${categoryId}`);
-      return;
+    const channel = await guild.channels.fetch(categoryId).catch(() => null);
+    if (channel?.type !== ChannelType.GuildCategory) {
+      throw new Error(`applyLivePermissions: category not found: ${categoryId}`);
     }
+    const category = channel;
 
     // @everyone HAS ViewChannel in this guild's base permissions, so it must be
     // denied explicitly — role allows alone would hide nothing.
@@ -339,10 +442,16 @@ class DiscordService {
 
     // Ensure the per-CTF role and VIEW_ALL role cannot see it while live.
     for (const roleId of [perCtfRoleId, config.VIEW_ALL_CTF_ROLEID]) {
-      if (roleId && category.permissionOverwrites.cache.has(roleId)) {
+      if (
+        roleId &&
+        roleId !== config.ACTIVE_CTF_ROLEID &&
+        category.permissionOverwrites.cache.has(roleId)
+      ) {
         await category.permissionOverwrites.delete(roleId);
       }
     }
+
+    await this.syncCategoryChildren(category, perCtfRoleId);
   }
 
   /**
@@ -355,11 +464,11 @@ class DiscordService {
     categoryId: string,
     perCtfRoleId: string
   ): Promise<void> {
-    const category = guild.channels.cache.get(categoryId) as CategoryChannel | undefined;
-    if (!category) {
-      logger.warn(`applyEndedPermissions: category not found: ${categoryId}`);
-      return;
+    const channel = await guild.channels.fetch(categoryId).catch(() => null);
+    if (channel?.type !== ChannelType.GuildCategory) {
+      throw new Error(`applyEndedPermissions: category not found: ${categoryId}`);
     }
+    const category = channel;
 
     await category.permissionOverwrites.edit(guild.roles.everyone, { ViewChannel: false });
 
@@ -367,6 +476,51 @@ class DiscordService {
       await category.permissionOverwrites.edit(perCtfRoleId, { ViewChannel: true });
     }
     await category.permissionOverwrites.edit(config.VIEW_ALL_CTF_ROLEID, { ViewChannel: true });
+    if (config.DENY_CTF_ROLEID) {
+      await category.permissionOverwrites.edit(config.DENY_CTF_ROLEID, { ViewChannel: false });
+    }
+    await this.syncCategoryChildren(category, perCtfRoleId);
+  }
+
+  /** Remove shared credentials before a CTF becomes visible to archive roles. */
+  async redactCTFCredentials(
+    guild: Guild,
+    infoChannelId: string,
+    infoMessageId: string
+  ): Promise<boolean> {
+    if (!infoChannelId || infoChannelId === '0' || !infoMessageId || infoMessageId === '0') {
+      return true;
+    }
+
+    try {
+      const channel = await guild.channels.fetch(infoChannelId).catch(() => null);
+      if (channel?.type !== ChannelType.GuildText) return true;
+
+      const message = await channel.messages.fetch(infoMessageId).catch(() => null);
+      if (!message) return true;
+
+      let changed = false;
+      const embeds = message.embeds.map((messageEmbed) => {
+        const embed = messageEmbed.toJSON();
+        if (!embed.fields) return embed;
+
+        embed.fields = embed.fields.map((field) => {
+          if (field.name.toLowerCase() !== 'login') return field;
+          changed = true;
+          return {
+            ...field,
+            value: 'Credentials removed automatically after the competition ended.',
+          };
+        });
+        return embed;
+      });
+
+      if (changed) await message.edit({ embeds });
+      return true;
+    } catch (error) {
+      logger.error(`Failed to redact credentials in channel ${infoChannelId}:`, error);
+      return false;
+    }
   }
 
   /**
@@ -384,10 +538,19 @@ class DiscordService {
       if (data.archived || data.channelsPurged) continue;
       if (!data.cate || data.cate === '0') continue;
       if (data.postEndOpened) continue;
-      if (isCtfLive(data.endtime, now)) continue;
-      if (!guild.channels.cache.has(data.cate)) continue;
+      const competitionEnd = data.competitionEndtime || data.endtime;
+      if (isCtfLive(competitionEnd, now)) continue;
 
       try {
+        const credentialsRedacted = await this.redactCTFCredentials(
+          guild,
+          data.channel,
+          data.infom
+        );
+        if (!credentialsRedacted) {
+          logger.warn(`Keeping ${data.name} private because credential redaction failed`);
+          continue;
+        }
         await this.applyEndedPermissions(guild, data.cate, data.role);
         await databaseService.updateCTF(key, { postEndOpened: true });
         reverted++;
@@ -412,7 +575,7 @@ class DiscordService {
   ): Promise<boolean> {
     try {
       const eventOptions: GuildScheduledEventCreateOptions = {
-        name,
+        name: name.slice(0, 100),
         description: `CTF Event: ${name}`,
         scheduledStartTime: startTime,
         scheduledEndTime: endTime,

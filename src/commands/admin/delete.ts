@@ -13,6 +13,7 @@ const command: Command = {
       option
         .setName('search_id')
         .setDescription('Nhập CTFTime ID, hoặc Discord Category ID')
+        .setMaxLength(20)
         .setRequired(true)
     ) as SlashCommandBuilder,
 
@@ -21,16 +22,20 @@ const command: Command = {
       if (!(await requireAdmin(interaction))) return;
 
       if (!interaction.guild) {
-        await interaction.reply({ embeds: [errorEmbed('This command must be used in a server')], ephemeral: true });
+        await interaction.reply({
+          embeds: [errorEmbed('This command must be used in a server')],
+          ephemeral: true,
+        });
         return;
       }
 
       await interaction.deferReply({ ephemeral: true });
 
-      const searchId = interaction.options.get('search_id')?.value as string;
+      const searchId = interaction.options.getString('search_id', true).trim();
 
       // Find CTF by CTFtime ID or Category ID
-      let ctf = await databaseService.findByCTFTimeId(parseInt(searchId));
+      const ctftimeId = /^\d{1,10}$/.test(searchId) ? Number(searchId) : null;
+      let ctf = ctftimeId ? await databaseService.findByCTFTimeId(ctftimeId) : null;
 
       if (!ctf) {
         ctf = await databaseService.findByCategoryId(searchId);

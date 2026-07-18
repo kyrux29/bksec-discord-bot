@@ -23,7 +23,12 @@ const command: Command = {
         .setName('category')
         .setDescription('Task category')
         .setRequired(true)
-        .addChoices(...taskCategories.map((category) => ({ name: taskCategoryLabels[category], value: category })))
+        .addChoices(
+          ...taskCategories.map((category) => ({
+            name: taskCategoryLabels[category],
+            value: category,
+          }))
+        )
     ) as SlashCommandBuilder,
 
   async execute(interaction: ChatInputCommandInteraction) {

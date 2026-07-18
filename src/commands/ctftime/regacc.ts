@@ -1,123 +1,138 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction, TextChannel } from 'discord.js';
-import { Command, CTFInfo } from '../../types';
+import { ChannelType, ChatInputCommandInteraction, SlashCommandBuilder } from 'discord.js';
+import { Command } from '../../types';
 import ctftimeService from '../../services/ctftime.service';
 import databaseService from '../../services/database.service';
 import { createEmbed, errorEmbed, successEmbed } from '../../utils/embed.builder';
 import logger from '../../utils/logger';
 import { config } from '../../config/env';
+import { requireAdmin } from '../../utils/role.guard';
+
+async function currentCategoryId(interaction: ChatInputCommandInteraction): Promise<string | null> {
+  const channel = interaction.channel;
+  if (!channel) return null;
+
+  if (channel.isThread()) {
+    if (!channel.parentId || !interaction.guild) return null;
+    const parent = await interaction.guild.channels.fetch(channel.parentId).catch(() => null);
+    return parent && 'parentId' in parent ? parent.parentId : null;
+  }
+
+  return 'parentId' in channel ? channel.parentId : null;
+}
 
 const command: Command = {
   data: new SlashCommandBuilder()
     .setName('ct-regacc')
-    .setDescription('[CTFTime] Update thông tin tài khoản của CTF đã tạo')
+    .setDescription('[CTFTime] Cập nhật tài khoản dùng chung của CTF')
     .addStringOption((option) =>
       option
         .setName('username')
-        .setDescription('Tên đăng nhập của account đã tạo')
+        .setDescription('Tên đăng nhập của tài khoản dùng chung')
+        .setMaxLength(128)
         .setRequired(true)
     )
     .addStringOption((option) =>
       option
         .setName('password')
-        .setDescription('Mật khẩu của account đã tạo')
+        .setDescription('Mật khẩu của tài khoản dùng chung')
+        .setMaxLength(256)
         .setRequired(true)
     )
     .addStringOption((option) =>
       option
         .setName('cate_id')
-        .setDescription(
-          'Nhập Discord Category ID của giải CTF trong server [Hoặc chỉ cần chạy trong channel thuộc CTF đó]'
-        )
+        .setDescription('Discord Category ID; tự nhận diện nếu bỏ trống')
+        .setMaxLength(20)
         .setRequired(false)
     ) as SlashCommandBuilder,
 
   async execute(interaction: ChatInputCommandInteraction) {
     try {
-      if (!interaction.guild || !interaction.channel) {
-        await interaction.reply({ embeds: [errorEmbed('This command must be used in a server')], ephemeral: true });
+      if (!(await requireAdmin(interaction))) return;
+      if (!interaction.guild) return;
+
+      await interaction.deferReply({ ephemeral: true });
+
+      const username = interaction.options.getString('username', true);
+      const password = interaction.options.getString('password', true);
+      if (!username.trim() || !password) {
+        await interaction.editReply({
+          embeds: [errorEmbed('Username và password không được để trống.')],
+        });
+        return;
+      }
+      const suppliedCategoryId = interaction.options.getString('cate_id');
+      const categoryId = suppliedCategoryId || (await currentCategoryId(interaction));
+
+      if (!categoryId || !/^\d{17,20}$/.test(categoryId)) {
+        await interaction.editReply({
+          embeds: [errorEmbed('Không tìm thấy Discord Category ID hợp lệ.')],
+        });
         return;
       }
 
-      await interaction.deferReply();
-
-      const username = interaction.options.get('username')?.value as string;
-      const password = interaction.options.get('password')?.value as string;
-      let cateId = interaction.options.get('cate_id')?.value as string | undefined;
-
-      // Get category ID from current channel if not provided
-      if (!cateId || cateId === '0') {
-        const channel = interaction.channel as TextChannel;
-        if (!channel.parent) {
-          await interaction.editReply({ embeds: [errorEmbed('This channel is not in a category')] });
-          return;
-        }
-        cateId = channel.parent.id;
-      }
-
-      // Validate category ID
-      if (!/^\d+$/.test(cateId)) {
-        await interaction.editReply({ embeds: [errorEmbed('Invalid category ID')] });
-        return;
-      }
-
-      // Find CTF data
-      const ctf = await databaseService.findByCategoryId(cateId);
-
+      const ctf = await databaseService.findByCategoryId(categoryId);
       if (!ctf || ctf.data.ctftimeid === 0) {
-        await interaction.editReply({ embeds: [errorEmbed('CTF not found in database')] });
+        await interaction.editReply({
+          embeds: [errorEmbed('CTFTime event không tồn tại trong DB.')],
+        });
         return;
       }
 
-      // Get updated CTF info with credentials
-      const result = await ctftimeService.getCTF(ctf.data.ctftimeid, true, username, password);
+      const competitionEnd = ctf.data.competitionEndtime || ctf.data.endtime;
+      if (competitionEnd > 0 && Math.floor(Date.now() / 1000) >= competitionEnd) {
+        await interaction.editReply({
+          embeds: [errorEmbed('Không thể cập nhật credentials sau khi giải đã kết thúc.')],
+        });
+        return;
+      }
 
-      if (!result || !('title' in result)) {
+      const result = await ctftimeService.getCTF(ctf.data.ctftimeid, true, username, password);
+      if (!result || !('archiveAt' in result)) {
         await interaction.editReply({ embeds: [errorEmbed('Failed to fetch CTF info')] });
         return;
       }
 
-      const ctfInfo = result as CTFInfo;
-
-      // Update the pinned message in info channel
-      const channel = interaction.guild.channels.cache.get(ctf.data.channel) as TextChannel;
-
-      if (!channel) {
+      const infoChannel = await interaction.guild.channels
+        .fetch(ctf.data.channel)
+        .catch(() => null);
+      if (infoChannel?.type !== ChannelType.GuildText) {
         await interaction.editReply({ embeds: [errorEmbed('Info channel not found')] });
         return;
       }
 
-      const message = await channel.messages.fetch(ctf.data.infom);
-
+      const message = await infoChannel.messages.fetch(ctf.data.infom).catch(() => null);
       if (!message) {
         await interaction.editReply({ embeds: [errorEmbed('Info message not found')] });
         return;
       }
 
-      const embed = createEmbed(ctfInfo.embedData);
-      await message.edit({ embeds: [embed] });
-
+      await message.edit({ embeds: [createEmbed(result.embedData)] });
       await interaction.editReply({
-        embeds: [successEmbed(`Login info của <***${ctf.data.name}***> đã được update`)],
+        embeds: [
+          successEmbed(
+            `Đã cập nhật login của <***${ctf.data.name}***>. Mật khẩu được ẩn bằng spoiler và sẽ tự xoá khi giải kết thúc.`
+          ),
+        ],
       });
 
-      // Log to log channel
       if (config.LOG_CHANNELID) {
-        const logChannel = interaction.guild.channels.cache.get(config.LOG_CHANNELID) as TextChannel;
-        if (logChannel) {
-          await logChannel.send(
-            `${interaction.user.username} has updated login info for ***${ctf.data.name}***`
-          );
+        const logChannel = interaction.guild.channels.cache.get(config.LOG_CHANNELID);
+        if (logChannel?.isTextBased()) {
+          await logChannel
+            .send(`${interaction.user.username} updated shared login for ***${ctf.data.name}***`)
+            .catch((error) => logger.warn('Could not write ct-regacc audit log:', error));
         }
       }
 
-      logger.info(
-        `User ${interaction.user.tag} updated login info for CTF: ${ctf.data.name}`
-      );
+      logger.info(`User ${interaction.user.tag} updated login info for CTF: ${ctf.data.name}`);
     } catch (error) {
       logger.error('Error in ct-regacc command:', error);
-
+      const payload = { embeds: [errorEmbed('Không thể cập nhật tài khoản CTF.')] };
       if (interaction.deferred || interaction.replied) {
-        await interaction.editReply({ embeds: [errorEmbed('An error occurred')] });
+        await interaction.editReply(payload).catch(() => undefined);
+      } else {
+        await interaction.reply({ ...payload, ephemeral: true }).catch(() => undefined);
       }
     }
   },

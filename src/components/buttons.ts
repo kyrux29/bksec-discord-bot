@@ -49,11 +49,7 @@ export class HideOngoButtons extends ActionRowBuilder<ButtonBuilder> {
  * Pagination buttons for upcoming CTFs
  */
 export class UpcomingPaginationButtons extends ActionRowBuilder<ButtonBuilder> {
-  constructor(
-    currentPage: number,
-    step: number,
-    totalPages: number
-  ) {
+  constructor(currentPage: number, step: number, totalPages: number) {
     super();
 
     const prevButton = new ButtonBuilder()
@@ -76,12 +72,7 @@ export class UpcomingPaginationButtons extends ActionRowBuilder<ButtonBuilder> {
  * Pagination buttons for CTF list
  */
 export class ListPaginationButtons extends ActionRowBuilder<ButtonBuilder> {
-  constructor(
-    order: string,
-    currentPage: number,
-    step: number,
-    totalPages: number
-  ) {
+  constructor(order: string, currentPage: number, step: number, totalPages: number) {
     super();
 
     const prevButton = new ButtonBuilder()
@@ -217,13 +208,21 @@ export async function handleButtonInteraction(interaction: ButtonInteraction) {
     }
 
     // Handle delete confirmation buttons
-    if (customId.startsWith('delete_all_') || customId.startsWith('delete_keep_') || customId.startsWith('delete_cancel_')) {
+    if (
+      customId.startsWith('delete_all_') ||
+      customId.startsWith('delete_keep_') ||
+      customId.startsWith('delete_cancel_')
+    ) {
       const parts = customId.split('_');
       const action = parts[1]; // 'all', 'keep', or 'cancel'
       const ctfKey = parts[2];
       const requesterId = parts[3];
 
-      if (!interaction.guild || interaction.user.id !== requesterId || !(await isAdmin(interaction))) {
+      if (
+        !interaction.guild ||
+        interaction.user.id !== requesterId ||
+        !(await isAdmin(interaction))
+      ) {
         await interaction.reply({
           embeds: [errorEmbed('You do not have permission to perform this action')],
           ephemeral: true,
@@ -252,7 +251,10 @@ export async function handleButtonInteraction(interaction: ButtonInteraction) {
       const ctfData = ctf.data;
 
       if (action === 'all') {
-        const categoryDeleted = await discordService.deleteCTFCategory(interaction.guild, ctfData.cate);
+        const categoryDeleted = await discordService.deleteCTFCategory(
+          interaction.guild,
+          ctfData.cate
+        );
         if (!categoryDeleted) {
           await interaction.editReply({
             embeds: [errorEmbed('Failed to delete Discord category. Database was not changed.')],
@@ -261,7 +263,27 @@ export async function handleButtonInteraction(interaction: ButtonInteraction) {
           return;
         }
       } else if (action === 'keep') {
-        const categoryUnlisted = await discordService.unlistCTFCategory(interaction.guild, ctfData.cate);
+        const credentialsRedacted = await discordService.redactCTFCredentials(
+          interaction.guild,
+          ctfData.channel,
+          ctfData.infom
+        );
+        if (!credentialsRedacted) {
+          await interaction.editReply({
+            embeds: [
+              errorEmbed(
+                'Could not remove shared credentials. Channels and database were not changed.'
+              ),
+            ],
+            components: [],
+          });
+          return;
+        }
+
+        const categoryUnlisted = await discordService.unlistCTFCategory(
+          interaction.guild,
+          ctfData.cate
+        );
         if (!categoryUnlisted) {
           await interaction.editReply({
             embeds: [errorEmbed('Failed to unlist Discord category. Database was not changed.')],
@@ -278,7 +300,11 @@ export async function handleButtonInteraction(interaction: ButtonInteraction) {
         } catch (error) {
           logger.error(`Failed to delete role for ${ctfData.name}:`, error);
           await interaction.editReply({
-            embeds: [errorEmbed('Discord category was updated, but role deletion failed. Database was kept so the operation can be retried.')],
+            embeds: [
+              errorEmbed(
+                'Discord category was updated, but role deletion failed. Database was kept so the operation can be retried.'
+              ),
+            ],
             components: [],
           });
           return;
@@ -295,9 +321,13 @@ export async function handleButtonInteraction(interaction: ButtonInteraction) {
         });
 
         if (config.LOG_CHANNELID) {
-          const logChannel = interaction.guild.channels.cache.get(config.LOG_CHANNELID) as TextChannel;
+          const logChannel = interaction.guild.channels.cache.get(
+            config.LOG_CHANNELID
+          ) as TextChannel;
           if (logChannel) {
-            await logChannel.send(`${interaction.user.username} has deleted <***${ctfData.name}***>`);
+            await logChannel.send(
+              `${interaction.user.username} has deleted <***${ctfData.name}***>`
+            );
           }
         }
 
@@ -309,7 +339,9 @@ export async function handleButtonInteraction(interaction: ButtonInteraction) {
         });
 
         if (config.LOG_CHANNELID) {
-          const logChannel = interaction.guild.channels.cache.get(config.LOG_CHANNELID) as TextChannel;
+          const logChannel = interaction.guild.channels.cache.get(
+            config.LOG_CHANNELID
+          ) as TextChannel;
           if (logChannel) {
             await logChannel.send(
               `${interaction.user.username} has unlinked <***${ctfData.name}***> from the database`
@@ -338,7 +370,12 @@ export async function handleButtonInteraction(interaction: ButtonInteraction) {
           // Check if user already has the role
           if (member.roles.cache.has(config.VERIFIED_ROLE_ID)) {
             await interaction.update({
-              embeds: [warningEmbed('Already Verified', 'You have already accepted the terms and conditions.')],
+              embeds: [
+                warningEmbed(
+                  'Already Verified',
+                  'You have already accepted the terms and conditions.'
+                ),
+              ],
               components: [],
             });
             return;
@@ -359,14 +396,19 @@ export async function handleButtonInteraction(interaction: ButtonInteraction) {
           await member.roles.add(role.id);
 
           await interaction.update({
-            embeds: [successEmbed('Welcome! Your role has been added. You will now be able to access server channels.')],
+            embeds: [
+              successEmbed(
+                'Welcome! Your role has been added. You will now be able to access server channels.'
+              ),
+            ],
             components: [],
           });
-
         } catch (error) {
           logger.error('Error adding verified role:', error);
           await interaction.update({
-            embeds: [errorEmbed('Failed to add role. Please try again or contact an administrator.')],
+            embeds: [
+              errorEmbed('Failed to add role. Please try again or contact an administrator.'),
+            ],
             components: [],
           });
         }
@@ -384,5 +426,16 @@ export async function handleButtonInteraction(interaction: ButtonInteraction) {
     }
   } catch (error) {
     logger.error('Error handling button interaction:', error);
+    if (!interaction.isRepliable()) return;
+
+    const payload = {
+      embeds: [errorEmbed('Không thể xử lý thao tác này. Vui lòng thử lại.')],
+      components: [],
+    };
+    if (interaction.deferred || interaction.replied) {
+      await interaction.editReply(payload).catch(() => undefined);
+    } else {
+      await interaction.reply({ ...payload, ephemeral: true }).catch(() => undefined);
+    }
   }
 }

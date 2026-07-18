@@ -20,7 +20,11 @@ export function calculateEndTime(startTimestamp: number, hours: number, days: nu
 /**
  * Check if event duration is longer than specified days
  */
-export function isLongEvent(durationHours: number, durationDays: number, thresholdDays: number = 5): boolean {
+export function isLongEvent(
+  durationHours: number,
+  durationDays: number,
+  thresholdDays: number = 5
+): boolean {
   const totalHours = durationHours + 24 * durationDays;
   return totalHours > thresholdDays * 24;
 }
@@ -55,7 +59,12 @@ export function extractDiscordLink(description: string): string | null {
 /**
  * Format CTF format string with emojis
  */
-export function formatCTFFormat(format: string, onsite: boolean, location: string, restrictions: string): string | null {
+export function formatCTFFormat(
+  format: string,
+  onsite: boolean,
+  location: string,
+  restrictions: string
+): string | null {
   let formatted = format;
 
   if (format === 'Attack-Defense') {
